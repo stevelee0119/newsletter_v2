@@ -63,7 +63,8 @@ def fetch_keyword(keyword: str, category: str, since: datetime) -> list[dict]:
         pub = _parse_pubdate(item.findtext("pubDate"))
         if not title or not link:
             continue
-        if pub and pub < since:
+        # 발행 시각을 확인할 수 없거나 수집 범위(기본 24시간)보다 오래된 기사는 제외
+        if pub is None or pub < since:
             continue
         articles.append(
             {

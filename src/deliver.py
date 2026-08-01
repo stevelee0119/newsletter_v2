@@ -1,7 +1,10 @@
-"""발송 모듈 — 카카오톡 '나에게 보내기'(1순위) + 텔레그램(2순위).
+"""발송 모듈 — 카카오톡 '나에게 보내기'(1순위) + 텔레그램(2순위) + Notion 동기화.
 
 카카오 액세스 토큰은 리프레시 토큰으로 매회 갱신하며, 카카오가 새 리프레시
 토큰을 발급하면 GH_PAT가 설정된 경우 GitHub Secret을 자동 갱신한다.
+
+Notion 동기화는 카카오톡 발송과 동시에 실행되는 아카이브 채널로, 카카오·
+텔레그램 성공 여부와 무관하게(선택 설정된 경우) 별도로 시도된다.
 """
 
 from __future__ import annotations
@@ -19,6 +22,10 @@ KAKAO_TOKEN_URL = "https://kauth.kakao.com/oauth/token"
 KAKAO_MEMO_URL = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
 TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
 TELEGRAM_CHUNK = 4000
+NOTION_API_BASE = "https://api.notion.com/v1"
+NOTION_VERSION = "2022-06-28"
+NOTION_BLOCK_LIMIT = 100  # 단일 요청당 최대 자식 블록 수
+NOTION_RICH_TEXT_LIMIT = 1900  # Notion rich_text content 최대 2000자 여유분
 
 
 # ---------------------------------------------------------------- 카카오
@@ -125,12 +132,97 @@ def _split_text(text: str, limit: int) -> list[str]:
     return chunks
 
 
+# ---------------------------------------------------------------- Notion
+
+def _notion_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {os.environ['NOTION_API_KEY']}",
+        "Notion-Version": NOTION_VERSION,
+        "Content-Type": "application/json",
+    }
+
+
+def _notion_title_property(database_id: str, headers: dict) -> str:
+    """데이터베이스 스키마에서 title 타입 속성명을 찾는다 (한/영 사용자 DB 모두 대응)."""
+    resp = requests.get(f"{NOTION_API_BASE}/databases/{database_id}", headers=headers, timeout=20)
+    resp.raise_for_status()
+    for name, prop in resp.json()["properties"].items():
+        if prop.get("type") == "title":
+            return name
+    raise RuntimeError("Notion 데이터베이스에 title 속성이 없습니다")
+
+
+def _paragraph_block(text: str) -> dict:
+    rich_text = [{"type": "text", "text": {"content": text}}] if text else []
+    return {"object": "block", "type": "paragraph", "paragraph": {"rich_text": rich_text}}
+
+
+def _text_to_blocks(text: str) -> list[dict]:
+    """전문을 줄 단위 문단 블록으로 변환 (Notion rich_text 2000자 제한 대응)."""
+    blocks = []
+    for line in text.split("\n"):
+        remaining = line
+        while len(remaining) > NOTION_RICH_TEXT_LIMIT:
+            blocks.append(_paragraph_block(remaining[:NOTION_RICH_TEXT_LIMIT]))
+            remaining = remaining[NOTION_RICH_TEXT_LIMIT:]
+        blocks.append(_paragraph_block(remaining))
+    return blocks
+
+
+def send_notion(full_text: str, title: str) -> bool:
+    """Notion 데이터베이스에 뉴스레터 페이지를 생성 (카카오톡과 동시 실행되는 아카이브)."""
+    if not os.environ.get("NOTION_API_KEY") or not os.environ.get("NOTION_DATABASE_ID"):
+        log.info("Notion 설정 없음 — 건너뜀")
+        return False
+    try:
+        database_id = os.environ["NOTION_DATABASE_ID"]
+        headers = _notion_headers()
+        title_prop = _notion_title_property(database_id, headers)
+        blocks = _text_to_blocks(full_text)
+
+        create_resp = requests.post(
+            f"{NOTION_API_BASE}/pages",
+            headers=headers,
+            json={
+                "parent": {"database_id": database_id},
+                "properties": {
+                    title_prop: {"title": [{"type": "text", "text": {"content": title}}]}
+                },
+                "children": blocks[:NOTION_BLOCK_LIMIT],
+            },
+            timeout=30,
+        )
+        create_resp.raise_for_status()
+        page_id = create_resp.json()["id"]
+
+        for i in range(NOTION_BLOCK_LIMIT, len(blocks), NOTION_BLOCK_LIMIT):
+            batch = blocks[i : i + NOTION_BLOCK_LIMIT]
+            append_resp = requests.patch(
+                f"{NOTION_API_BASE}/blocks/{page_id}/children",
+                headers=headers,
+                json={"children": batch},
+                timeout=30,
+            )
+            append_resp.raise_for_status()
+
+        log.info("Notion 동기화 완료 (%d개 블록)", len(blocks))
+        return True
+    except Exception as e:
+        log.error("Notion 동기화 실패: %s", e)
+        return False
+
+
 # ---------------------------------------------------------------- 발송 오케스트레이션
 
-def deliver(summary: str, full_text: str, link_url: str) -> bool:
-    """DELIVERY_MODE에 따라 발송. 하나라도 성공하면 True."""
+def deliver(summary: str, full_text: str, link_url: str, title: str) -> bool:
+    """카카오톡·Notion을 동시 시도하고, DELIVERY_MODE에 따라 텔레그램을 발송한다.
+
+    성공 여부는 실제 수신 채널인 카카오톡·텔레그램 기준으로 판단한다.
+    Notion은 아카이브 동기화이므로 실패해도 워크플로 전체를 실패시키지 않는다.
+    """
     mode = os.environ.get("DELIVERY_MODE", "all").lower()
     kakao_ok = send_kakao(summary, link_url)
+    send_notion(full_text, title)
     if mode == "fallback" and kakao_ok:
         return True
     telegram_ok = send_telegram(full_text)

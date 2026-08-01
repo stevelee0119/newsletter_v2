@@ -59,7 +59,24 @@
 
 ---
 
-## 5. 동작 확인
+## 5. Notion 동기화 설정 (선택, 카카오톡과 동시 발송)
+
+1. https://www.notion.so/my-integrations → **New integration** 생성
+   - Associated workspace: 뉴스레터를 저장할 워크스페이스 선택
+   - Capabilities: **Insert content** 활성화 확인
+   - 생성 후 표시되는 **Internal Integration Secret** 복사 (`ntn_...` 또는 `secret_...`)
+2. Notion에서 뉴스레터를 쌓을 **데이터베이스**를 새로 만들거나 기존 것을 사용
+3. 해당 데이터베이스 페이지 우측 상단 **···** → **연결(Connections)** → 1번에서 만든 인테그레이션 추가 (이 단계를 빠뜨리면 API가 403을 반환합니다)
+4. 데이터베이스 URL에서 ID 추출: `https://www.notion.so/워크스페이스/<32자리ID>?v=...` 의 32자리 문자열이 **database_id**
+5. Secrets 등록:
+   - `NOTION_API_KEY`
+   - `NOTION_DATABASE_ID`
+
+> 데이터베이스에 제목(title) 속성만 있으면 되고, 그 외 속성(태그, 날짜 등)은 자유롭게 추가해도 됩니다 — 프로그램은 title 속성만 채웁니다.
+
+---
+
+## 6. 동작 확인
 
 1. 저장소 → **Actions** 탭 → `daily-newsletter` → **Run workflow** (수동 실행)
 2. 실행 로그에서 수집→분류→발송 확인, 카카오톡/텔레그램 수신 확인
@@ -71,27 +88,29 @@
 
 ---
 
-## 6. 운영 스케줄
+## 7. 운영 스케줄
 
 | 시각 (KST) | 동작 |
 |---|---|
 | 05:40 | 본 실행 시작 (Actions 지연 흡수 버퍼) |
-| ~05:45–06:15 | 수집·중복제거·분류·조판, 아카이브 커밋 |
-| 06:28 | 발송 (카카오 요약+링크, 텔레그램 전문) |
+| ~05:45–06:15 | 수집(24시간 이내 기사만)·중복제거·분류·조판, 아카이브 커밋 |
+| 06:28 | 발송 (카카오 요약+링크와 Notion 동기화 동시 실행, 텔레그램 전문) |
 | 06:45 | 백업 실행 — 이미 발송됐으면 즉시 종료, 아니면 생성 후 즉시 발송 |
 
-## 7. 설정 변경
+## 8. 설정 변경
 
 - **키워드/섹션 분량/언론사 순위**: `config.yaml`
+- **수집 시효**: `config.yaml`의 `lookback_hours` (기본 24)
 - **발송 시각**: `.github/workflows/newsletter.yml`의 cron 및 `TARGET_SEND_TIME`
-- **발송 모드**: 같은 파일의 `DELIVERY_MODE` (`all`=둘 다 / `fallback`=카카오 실패 시만 텔레그램)
+- **발송 모드**: 같은 파일의 `DELIVERY_MODE` (`all`=카카오+Notion+텔레그램 / `fallback`=카카오 실패 시만 텔레그램, Notion은 항상 동시 시도)
 - **모델**: `config.yaml`의 `model` (기본 `claude-haiku-4-5`, 품질 우선 시 `claude-sonnet-5`)
 
-## 8. 로컬 테스트
+## 9. 로컬 테스트
 
 ```bash
 pip install -r requirements.txt
 export ANTHROPIC_API_KEY=...
-export TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=...   # 선택
+export TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=...        # 선택
+export NOTION_API_KEY=... NOTION_DATABASE_ID=...          # 선택
 python -m src.main run
 ```

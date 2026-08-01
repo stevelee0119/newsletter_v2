@@ -112,6 +112,7 @@ def send() -> None:
         if repo
         else "https://github.com"
     )
+    title = f"{now.strftime('%Y-%m-%d')} 국방·법무 주요 뉴스 브리핑"
 
     _wait_until_target()
 
@@ -119,6 +120,7 @@ def send() -> None:
         summary=summary_path.read_text(encoding="utf-8"),
         full_text=full_path.read_text(encoding="utf-8"),
         link_url=link_url,
+        title=title,
     )
     if not ok:
         raise RuntimeError("모든 발송 채널이 실패했습니다")

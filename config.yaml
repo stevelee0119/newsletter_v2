@@ -3,8 +3,8 @@
 # Claude 모델 (비용/품질에 따라 변경 가능: claude-sonnet-5 등)
 model: "claude-haiku-4-5"
 
-# 수집 범위 (시간)
-lookback_hours: 28
+# 수집 범위 — 발송 시각 기준 이내에 작성된 기사만 포함
+lookback_hours: 24
 
 # 키워드 (카테고리별)
 keywords:
@@ -54,6 +54,12 @@ keywords:
     - 공소청
     - 중수청
     - 공수처
+  rulings:
+    - 판결
+    - 재판부 판결
+    - 재판부 선고
+    - 법원 판결
+    - 법원 선고
   schedule:
     - 오늘의 법조
     - 오늘의 사회
@@ -65,6 +71,7 @@ candidate_limits:
   special_counsel: 25
   defense: 60
   law: 60
+  rulings: 25
   schedule: 15
 
 # 제목 유사도 클러스터링 임계값 (rapidfuzz token_set_ratio, 0~100)
