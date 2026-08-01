@@ -1,0 +1,178 @@
+"""발송 모듈 — 카카오톡 '나에게 보내기'(1순위) + 텔레그램(2순위).
+
+카카오 액세스 토큰은 리프레시 토큰으로 매회 갱신하며, 카카오가 새 리프레시
+토큰을 발급하면 GH_PAT가 설정된 경우 GitHub Secret을 자동 갱신한다.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import os
+
+import requests
+
+log = logging.getLogger(__name__)
+
+KAKAO_TOKEN_URL = "https://kauth.kakao.com/oauth/token"
+KAKAO_MEMO_URL = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
+TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
+TELEGRAM_CHUNK = 4000
+
+
+# ---------------------------------------------------------------- 카카오
+
+def _kakao_refresh_access_token() -> str | None:
+    """리프레시 토큰으로 액세스 토큰 발급. 회전된 리프레시 토큰은 Secret에 재저장."""
+    rest_key = os.environ.get("KAKAO_REST_API_KEY")
+    refresh_token = os.environ.get("KAKAO_REFRESH_TOKEN")
+    if not rest_key or not refresh_token:
+        return None
+
+    resp = requests.post(
+        KAKAO_TOKEN_URL,
+        data={
+            "grant_type": "refresh_token",
+            "client_id": rest_key,
+            "refresh_token": refresh_token,
+        },
+        timeout=20,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    new_refresh = data.get("refresh_token")
+    if new_refresh and new_refresh != refresh_token:
+        log.info("카카오 리프레시 토큰이 회전되었습니다. Secret 갱신 시도.")
+        if not update_github_secret("KAKAO_REFRESH_TOKEN", new_refresh):
+            log.warning(
+                "GH_PAT 미설정/실패 — KAKAO_REFRESH_TOKEN Secret을 수동으로 갱신하세요: %s...",
+                new_refresh[:8],
+            )
+    return data["access_token"]
+
+
+def send_kakao(summary: str, link_url: str) -> bool:
+    """카카오톡 '나에게 보내기' — 요약 + 전체보기 링크."""
+    try:
+        access_token = _kakao_refresh_access_token()
+        if not access_token:
+            log.info("카카오 설정 없음 — 건너뜀")
+            return False
+        template = {
+            "object_type": "text",
+            "text": summary[:200],
+            "link": {"web_url": link_url, "mobile_web_url": link_url},
+            "button_title": "전체 보기",
+        }
+        resp = requests.post(
+            KAKAO_MEMO_URL,
+            headers={"Authorization": f"Bearer {access_token}"},
+            data={"template_object": json.dumps(template, ensure_ascii=False)},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        log.info("카카오톡 발송 완료")
+        return True
+    except Exception as e:
+        log.error("카카오톡 발송 실패: %s", e)
+        return False
+
+
+# ---------------------------------------------------------------- 텔레그램
+
+def send_telegram(full_text: str) -> bool:
+    """텔레그램 봇으로 전문 발송 (4,000자 단위 분할)."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        log.info("텔레그램 설정 없음 — 건너뜀")
+        return False
+
+    chunks = _split_text(full_text, TELEGRAM_CHUNK)
+    try:
+        for chunk in chunks:
+            resp = requests.post(
+                TELEGRAM_API.format(token=token, method="sendMessage"),
+                json={
+                    "chat_id": chat_id,
+                    "text": chunk,
+                    "disable_web_page_preview": True,
+                },
+                timeout=20,
+            )
+            resp.raise_for_status()
+        log.info("텔레그램 발송 완료 (%d개 메시지)", len(chunks))
+        return True
+    except Exception as e:
+        log.error("텔레그램 발송 실패: %s", e)
+        return False
+
+
+def _split_text(text: str, limit: int) -> list[str]:
+    chunks: list[str] = []
+    remaining = text
+    while remaining:
+        if len(remaining) <= limit:
+            chunks.append(remaining)
+            break
+        cut = remaining.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = limit
+        chunks.append(remaining[:cut])
+        remaining = remaining[cut:].lstrip("\n")
+    return chunks
+
+
+# ---------------------------------------------------------------- 발송 오케스트레이션
+
+def deliver(summary: str, full_text: str, link_url: str) -> bool:
+    """DELIVERY_MODE에 따라 발송. 하나라도 성공하면 True."""
+    mode = os.environ.get("DELIVERY_MODE", "all").lower()
+    kakao_ok = send_kakao(summary, link_url)
+    if mode == "fallback" and kakao_ok:
+        return True
+    telegram_ok = send_telegram(full_text)
+    return kakao_ok or telegram_ok
+
+
+# ---------------------------------------------------------------- GitHub Secret 갱신
+
+def update_github_secret(name: str, value: str) -> bool:
+    """GH_PAT로 저장소 Actions Secret을 갱신 (libsodium sealed box)."""
+    pat = os.environ.get("GH_PAT")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not pat or not repo:
+        return False
+    try:
+        from nacl import encoding, public
+
+        headers = {
+            "Authorization": f"Bearer {pat}",
+            "Accept": "application/vnd.github+json",
+        }
+        key_resp = requests.get(
+            f"https://api.github.com/repos/{repo}/actions/secrets/public-key",
+            headers=headers,
+            timeout=20,
+        )
+        key_resp.raise_for_status()
+        key_data = key_resp.json()
+
+        pub_key = public.PublicKey(key_data["key"].encode(), encoding.Base64Encoder())
+        sealed = public.SealedBox(pub_key).encrypt(value.encode())
+        encrypted_value = base64.b64encode(sealed).decode()
+
+        put_resp = requests.put(
+            f"https://api.github.com/repos/{repo}/actions/secrets/{name}",
+            headers=headers,
+            json={"encrypted_value": encrypted_value, "key_id": key_data["key_id"]},
+            timeout=20,
+        )
+        put_resp.raise_for_status()
+        log.info("GitHub Secret %s 갱신 완료", name)
+        return True
+    except Exception as e:
+        log.error("GitHub Secret 갱신 실패: %s", e)
+        return False

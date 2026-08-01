@@ -1,0 +1,135 @@
+# 국방·법무 뉴스레터 설정
+
+# Claude 모델 (비용/품질에 따라 변경 가능: claude-sonnet-5 등)
+model: "claude-haiku-4-5"
+
+# 수집 범위 (시간)
+lookback_hours: 28
+
+# 키워드 (카테고리별)
+keywords:
+  special_counsel:
+    - 특검
+  defense:
+    - 국방부
+    - 합참
+    - 육군
+    - 해군
+    - 공군
+    - 해병대
+    - 법무관
+    - 군사경찰
+    - 장교
+    - 부사관
+    - 병사
+    - 후임병
+    - 방사청
+    - 무기체계
+    - 미래전
+    - 현대전
+    - 국제법
+    - 국제형사재판소
+    - 국제사법재판소
+  law:
+    - 대통령
+    - 청와대
+    - 본회의
+    - 법사위
+    - 국방위
+    - 운영위
+    - 법무부
+    - 법제처
+    - 변협
+    - 법무법인
+    - 로펌
+    - 대법원
+    - 헌재
+    - 사법부
+    - 양형위
+    - 법관
+    - 재판관
+    - 대검
+    - 검찰
+    - 경찰청
+    - 공소청
+    - 중수청
+    - 공수처
+  schedule:
+    - 오늘의 법조
+    - 오늘의 사회
+    - 오늘의 국회
+    - 오늘의 인사
+
+# 1차(로컬) 중복 제거 후 LLM에 넘길 카테고리별 후보 상한
+candidate_limits:
+  special_counsel: 25
+  defense: 60
+  law: 60
+  schedule: 15
+
+# 제목 유사도 클러스터링 임계값 (rapidfuzz token_set_ratio, 0~100)
+dedupe_threshold: 82
+
+# 서브섹션별 최대 기사 수 (뉴스레터 분량)
+section_limits:
+  special_counsel: 8
+  defense_general: 6
+  defense_nk_alliance: 4
+  defense_industry: 4
+  defense_intl_law: 4
+  law_assembly_gov: 5
+  law_general: 5
+  law_judiciary_agencies: 8
+  rulings: 6
+  schedules: 6
+
+# 언론사 순위 (앞일수록 우선 — "열람 많은 기사"의 대리 지표)
+# RSS의 <source> 표기와 매칭. 목록에 없는 언론사는 최하위 취급.
+media_rank:
+  - 연합뉴스
+  - 뉴시스
+  - 뉴스1
+  - KBS
+  - MBC
+  - SBS
+  - JTBC
+  - YTN
+  - 조선일보
+  - 중앙일보
+  - 동아일보
+  - 한겨레
+  - 경향신문
+  - 한국일보
+  - 서울신문
+  - 국민일보
+  - 세계일보
+  - 문화일보
+  - 매일경제
+  - 한국경제
+  - 서울경제
+  - 머니투데이
+  - 파이낸셜뉴스
+  - 이데일리
+  - 아시아경제
+  - 헤럴드경제
+  - 아주경제
+  - 디지털타임스
+  - 전자신문
+  - 법률신문
+  - 국방일보
+  - 더팩트
+  - 이투데이
+  - 노컷뉴스
+  - 오마이뉴스
+  - 프레시안
+  - 뉴스핌
+  - 아이뉴스24
+  - 데일리안
+
+# 수집에서 제외할 언론사 (해외/무관 매체 등)
+source_blocklist: []
+
+# 뉴스레터 말미 고정 링크
+fixed_links:
+  - label: 주요사설
+    url: https://news.naver.com/opinion/editorial
