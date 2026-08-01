@@ -128,6 +128,7 @@ GitHub Actions (cron 05:40 KST)
 | `ANTHROPIC_API_KEY` | Claude API | ✅ |
 | `KAKAO_REST_API_KEY` | 카카오 앱 REST 키 | 카카오 사용 시 |
 | `KAKAO_REFRESH_TOKEN` | 카카오 토큰 자동 갱신 | 카카오 사용 시 |
+| `KAKAO_CLIENT_SECRET` | 카카오 앱의 [카카오 로그인 > 보안]에서 Client Secret이 활성화된 경우 | 해당 시에만 |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | 텔레그램 발송 | 텔레그램 사용 시 |
 | `NOTION_API_KEY` | Notion 인테그레이션 토큰 | Notion 사용 시 |
 | `NOTION_DATABASE_ID` | 동기화 대상 Notion 데이터베이스 ID | Notion 사용 시 |

@@ -31,21 +31,26 @@ NOTION_RICH_TEXT_LIMIT = 1900  # Notion rich_text content 최대 2000자 여유�
 # ---------------------------------------------------------------- 카카오
 
 def _kakao_refresh_access_token() -> str | None:
-    """리프레시 토큰으로 액세스 토큰 발급. 회전된 리프레시 토큰은 Secret에 재저장."""
+    """리프레시 토큰으로 액세스 토큰 발급. 회전된 리프레시 토큰은 Secret에 재저장.
+
+    카카오 앱의 [카카오 로그인 > 보안]에서 Client Secret을 활성화한 경우
+    KAKAO_CLIENT_SECRET 환경변수도 함께 설정해야 한다(미설정 시 401 오류).
+    """
     rest_key = os.environ.get("KAKAO_REST_API_KEY")
     refresh_token = os.environ.get("KAKAO_REFRESH_TOKEN")
     if not rest_key or not refresh_token:
         return None
 
-    resp = requests.post(
-        KAKAO_TOKEN_URL,
-        data={
-            "grant_type": "refresh_token",
-            "client_id": rest_key,
-            "refresh_token": refresh_token,
-        },
-        timeout=20,
-    )
+    token_data = {
+        "grant_type": "refresh_token",
+        "client_id": rest_key,
+        "refresh_token": refresh_token,
+    }
+    client_secret = os.environ.get("KAKAO_CLIENT_SECRET")
+    if client_secret:
+        token_data["client_secret"] = client_secret
+
+    resp = requests.post(KAKAO_TOKEN_URL, data=token_data, timeout=20)
     resp.raise_for_status()
     data = resp.json()
 
