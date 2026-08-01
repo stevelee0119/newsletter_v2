@@ -28,6 +28,14 @@ NOTION_BLOCK_LIMIT = 100  # 단일 요청당 최대 자식 블록 수
 NOTION_RICH_TEXT_LIMIT = 1900  # Notion rich_text content 최대 2000자 여유분
 
 
+def _raise_with_body(resp: requests.Response) -> None:
+    """실패 시 응답 본문(정확한 오류 코드/메시지)까지 예외 메시지에 포함시킨다."""
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as e:
+        raise requests.HTTPError(f"{e} | 응답 본문: {resp.text[:500]}", response=resp) from None
+
+
 # ---------------------------------------------------------------- 카카오
 
 def _kakao_refresh_access_token() -> str | None:
@@ -51,7 +59,7 @@ def _kakao_refresh_access_token() -> str | None:
         token_data["client_secret"] = client_secret
 
     resp = requests.post(KAKAO_TOKEN_URL, data=token_data, timeout=20)
-    resp.raise_for_status()
+    _raise_with_body(resp)
     data = resp.json()
 
     new_refresh = data.get("refresh_token")
@@ -84,7 +92,7 @@ def send_kakao(summary: str, link_url: str) -> bool:
             data={"template_object": json.dumps(template, ensure_ascii=False)},
             timeout=20,
         )
-        resp.raise_for_status()
+        _raise_with_body(resp)
         log.info("카카오톡 발송 완료")
         return True
     except Exception as e:
@@ -114,7 +122,7 @@ def send_telegram(full_text: str) -> bool:
                 },
                 timeout=20,
             )
-            resp.raise_for_status()
+            _raise_with_body(resp)
         log.info("텔레그램 발송 완료 (%d개 메시지)", len(chunks))
         return True
     except Exception as e:
@@ -150,7 +158,7 @@ def _notion_headers() -> dict:
 def _notion_title_property(database_id: str, headers: dict) -> str:
     """데이터베이스 스키마에서 title 타입 속성명을 찾는다 (한/영 사용자 DB 모두 대응)."""
     resp = requests.get(f"{NOTION_API_BASE}/databases/{database_id}", headers=headers, timeout=20)
-    resp.raise_for_status()
+    _raise_with_body(resp)
     for name, prop in resp.json()["properties"].items():
         if prop.get("type") == "title":
             return name
@@ -197,7 +205,7 @@ def send_notion(full_text: str, title: str) -> bool:
             },
             timeout=30,
         )
-        create_resp.raise_for_status()
+        _raise_with_body(create_resp)
         page_id = create_resp.json()["id"]
 
         for i in range(NOTION_BLOCK_LIMIT, len(blocks), NOTION_BLOCK_LIMIT):
@@ -208,7 +216,7 @@ def send_notion(full_text: str, title: str) -> bool:
                 json={"children": batch},
                 timeout=30,
             )
-            append_resp.raise_for_status()
+            _raise_with_body(append_resp)
 
         log.info("Notion 동기화 완료 (%d개 블록)", len(blocks))
         return True
@@ -254,7 +262,7 @@ def update_github_secret(name: str, value: str) -> bool:
             headers=headers,
             timeout=20,
         )
-        key_resp.raise_for_status()
+        _raise_with_body(key_resp)
         key_data = key_resp.json()
 
         pub_key = public.PublicKey(key_data["key"].encode(), encoding.Base64Encoder())
@@ -267,7 +275,7 @@ def update_github_secret(name: str, value: str) -> bool:
             json={"encrypted_value": encrypted_value, "key_id": key_data["key_id"]},
             timeout=20,
         )
-        put_resp.raise_for_status()
+        _raise_with_body(put_resp)
         log.info("GitHub Secret %s 갱신 완료", name)
         return True
     except Exception as e:
