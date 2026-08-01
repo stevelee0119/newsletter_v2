@@ -25,7 +25,7 @@ from pathlib import Path
 import yaml
 
 from .classify import classify
-from .collect import collect_all, resolve_links
+from .collect import collect_all, filter_resolved_freshness, resolve_links
 from .dedupe import dedupe
 from .deliver import deliver
 from .format_newsletter import format_newsletter, format_summary
@@ -68,6 +68,14 @@ def generate() -> bool:
     selected = [a for arts in sections.values() for a in arts]
     log.info("최종 선정: %d건 — 원문 링크 복원 중", len(selected))
     resolve_links(selected)
+
+    lookback_hours = config.get("lookback_hours", 24)
+    total_before = sum(len(arts) for arts in sections.values())
+    for key, arts in sections.items():
+        sections[key] = filter_resolved_freshness(arts, lookback_hours)
+    total_after = sum(len(arts) for arts in sections.values())
+    if total_after != total_before:
+        log.info("발행일 재검증으로 %d건 제외 (%d -> %d)", total_before - total_after, total_before, total_after)
 
     full_text = format_newsletter(sections, config, now)
     summary = format_summary(sections, now)

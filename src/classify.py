@@ -43,7 +43,12 @@ SYSTEM_PROMPT = """당신은 국방·법무 분야 일간 뉴스 브리핑의 �
 
 [규칙]
 1. 각 기사를 가장 적합한 섹션 하나에만 배치하거나 탈락시킨다.
-2. 같은 사건·발표를 다룬 기사(제목이 달라도)는 1건만 남긴다. 내용이 더 상세하거나 주요 언론사인 기사를 남긴다.
+2. 같은 사건·발표를 다룬 기사는 제목이 서로 크게 다르더라도(예: 같은 사건의
+   다른 측면─"OOO 조사"와 "OOO 피의자 출석"─을 다룬 제목, 인용구 위주 제목,
+   요약 방식 차이 등) 반드시 1건만 남긴다. 검색 키워드(keyword)가 서로 달라
+   수집된 기사(예: "특검"과 "대통령")라도 같은 인물·사건을 다루면 동일하게
+   병합한다. 요약(description)까지 참고해 실제로 같은 사건인지 판단하라.
+   남길 기사는 내용이 더 상세하거나 주요 언론사인 쪽을 택한다.
 3. 독자와 무관한 기사(연예, 스포츠, 단순 주가·시황, 광고성, 지역 단신 등)는 탈락시킨다.
 4. 섹션 내 순서는 중요도(정책적 파급력, 독자 관련성) 순으로 정렬한다.
 5. 섹션별 최대 기사 수: {limits}
@@ -69,7 +74,13 @@ def classify(candidates: list[dict], config: dict) -> dict[str, list[dict]]:
     client = anthropic.Anthropic()
 
     articles_payload = [
-        {"id": i, "title": a["title"], "source": a["source"], "keyword": a["keyword"]}
+        {
+            "id": i,
+            "title": a["title"],
+            "source": a["source"],
+            "keyword": a["keyword"],
+            "description": a.get("description", "")[:150],
+        }
         for i, a in enumerate(candidates)
     ]
 

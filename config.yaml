@@ -77,6 +77,13 @@ candidate_limits:
 # 제목 유사도 클러스터링 임계값 (rapidfuzz token_set_ratio, 0~100)
 dedupe_threshold: 82
 
+# 보조 중복 판단: 핵심어(2글자 이상 어절) 겹침 비율(overlap coefficient, 0~100).
+# 언론사마다 제목을 크게 다르게 쓰는 동일 사건 기사를 token_set_ratio가 놓치는
+# 경우를 보완한다. 두 조건 중 하나라도 만족하면 중복으로 판단(OR).
+dedupe_overlap_threshold: 40
+# 위 겹침 비율 판단에 필요한 최소 공유 핵심어 수(너무 적으면 오탐 위험)
+dedupe_min_shared_tokens: 2
+
 # 서브섹션별 최대 기사 수 (뉴스레터 분량)
 section_limits:
   special_counsel: 8

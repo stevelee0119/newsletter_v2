@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
 RSS_BASE = "https://news.google.com/rss/search"
 HEADERS = {"User-Agent": "Mozilla/5.0 (newsletter-bot)"}
+_URL_DATE_RE = re.compile(r"(20\d{6})")
 
 
 def _rss_url(keyword: str) -> str:
@@ -34,6 +35,21 @@ def _parse_pubdate(text: str | None) -> datetime | None:
         return email.utils.parsedate_to_datetime(text)
     except (TypeError, ValueError):
         return None
+
+
+def _url_published_date(url: str):
+    """기사 URL에 포함된 발행일(YYYYMMDD, 국내 언론사 URL 관례)을 추출.
+
+    구글 뉴스의 pubDate는 원문 재크롤링/업데이트 시점으로 갱신되는 경우가 있어
+    실제 최초 발행일보다 최신으로 표시될 수 있다. URL에 새겨진 발행일은 대부분
+    바뀌지 않으므로 pubDate 신뢰도를 보강하는 2차 신호로 사용한다.
+    """
+    for match in _URL_DATE_RE.finditer(url):
+        try:
+            return datetime.strptime(match.group(1), "%Y%m%d").date()
+        except ValueError:
+            continue
+    return None
 
 
 def _clean_title(title: str, source: str) -> str:
@@ -134,3 +150,25 @@ def resolve_links(articles: list[dict], max_workers: int = 8) -> None:
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         list(pool.map(_resolve, articles))
+
+
+def filter_resolved_freshness(articles: list[dict], lookback_hours: int) -> list[dict]:
+    """resolve_links() 이후 언론사 원문 URL 발행일로 신선도를 재검증(2차 안전망).
+
+    구글 뉴스 pubDate는 원문 재크롤링/업데이트 시점으로 갱신되어 실제 최초
+    발행일보다 최신으로 표시되는 경우가 있다. 최종 선정된 소수의 기사만 대상으로
+    원문 URL에 새겨진 발행일(국내 언론사 URL 관례)과 대조해, 수집 범위보다 하루
+    이상 오래된 것으로 확인되면 발송 직전에 제외한다.
+    """
+    cutoff = (datetime.now(KST) - timedelta(hours=lookback_hours)).date() - timedelta(days=1)
+    kept = []
+    for a in articles:
+        url_date = _url_published_date(a["link"])
+        if url_date is not None and url_date < cutoff:
+            log.warning(
+                "발행일 재검증에서 제외 (%s, %s): URL 발행일=%s, pubDate=%s",
+                a["title"][:40], a.get("source"), url_date.isoformat(), a.get("published"),
+            )
+            continue
+        kept.append(a)
+    return kept
