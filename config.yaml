@@ -1,7 +1,7 @@
 # 국방·법무 뉴스레터 설정
 
 # Claude 모델 (비용/품질에 따라 변경 가능: claude-sonnet-5 등)
-model: "claude-haiku-4-5"
+model: "claude-sonnet-5"
 
 # 수집 범위 — 발송 시각 기준 이내에 작성된 기사만 포함
 lookback_hours: 24
