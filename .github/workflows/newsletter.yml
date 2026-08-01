@@ -1,0 +1,61 @@
+name: daily-newsletter
+
+on:
+  schedule:
+    # 본 실행: UTC 20:40 = KST 05:40 (Actions 지연 버퍼 포함, 06:28 KST에 발송)
+    - cron: "40 20 * * *"
+    # 백업 실행: UTC 21:45 = KST 06:45 (본 실행이 실패한 경우에만 생성·즉시 발송)
+    - cron: "45 21 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: newsletter
+  cancel-in-progress: false
+
+jobs:
+  newsletter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate newsletter
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python -m src.main generate
+
+      - name: Commit newsletter archive
+        run: |
+          if [ -f out/newsletter.txt ]; then
+            git config user.name "newsletter-bot"
+            git config user.email "actions@github.com"
+            git add newsletters/
+            git commit -m "newsletter: $(date +%Y-%m-%d) [skip ci]" || true
+            git pull --rebase origin main || true
+            git push origin HEAD:main
+          fi
+
+      - name: Wait and send
+        env:
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
+          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          DELIVERY_MODE: all
+          TARGET_SEND_TIME: "06:28"
+        run: python -m src.main send
