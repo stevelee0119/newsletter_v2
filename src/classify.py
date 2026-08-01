@@ -105,7 +105,15 @@ def classify(candidates: list[dict], config: dict) -> dict[str, list[dict]]:
     if response.stop_reason == "refusal":
         raise RuntimeError("분류 요청이 거부되었습니다 (stop_reason=refusal)")
 
-    text = next(b.text for b in response.content if b.type == "text")
+    text_blocks = [b.text for b in response.content if getattr(b, "type", None) == "text"]
+    if not text_blocks:
+        block_types = [getattr(b, "type", "?") for b in response.content]
+        raise RuntimeError(
+            "분류 응답에 텍스트 블록이 없습니다 "
+            f"(stop_reason={response.stop_reason}, 블록 타입={block_types}, "
+            f"토큰 in={response.usage.input_tokens} out={response.usage.output_tokens})"
+        )
+    text = text_blocks[0]
     result = json.loads(text)
 
     log.info(

@@ -1,7 +1,11 @@
 # 국방·법무 뉴스레터 설정
 
 # Claude 모델 (비용/품질에 따라 변경 가능: claude-sonnet-5 등)
-model: "claude-sonnet-5"
+# 2026-08-02: claude-sonnet-5로 변경 직후 첫 실행이 분류 응답에 text 블록이
+# 없어 StopIteration으로 실패(classify.py 진단 로그 보강 완료). 안정성이
+# 검증된 haiku-4-5로 되돌림 — 재전환 시 다음 실패 로그의 stop_reason/블록
+# 타입을 먼저 확인할 것.
+model: "claude-haiku-4-5"
 
 # 수집 범위 — 발송 시각 기준 이내에 작성된 기사만 포함
 lookback_hours: 24
