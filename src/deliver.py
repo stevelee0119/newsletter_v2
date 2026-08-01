@@ -80,12 +80,15 @@ def send_kakao(summary: str, link_url: str) -> bool:
         if not access_token:
             log.info("카카오 설정 없음 — 건너뜀")
             return False
+        if not link_url:
+            log.warning("link_url이 비어있습니다 — 버튼 없이 텍스트만 발송됩니다")
         template = {
             "object_type": "text",
             "text": summary[:200],
             "link": {"web_url": link_url, "mobile_web_url": link_url},
             "button_title": "전체 보기",
         }
+        log.info("카카오톡 전송 템플릿: %s", json.dumps(template, ensure_ascii=False))
         resp = requests.post(
             KAKAO_MEMO_URL,
             headers={"Authorization": f"Bearer {access_token}"},
@@ -93,7 +96,7 @@ def send_kakao(summary: str, link_url: str) -> bool:
             timeout=20,
         )
         _raise_with_body(resp)
-        log.info("카카오톡 발송 완료")
+        log.info("카카오톡 발송 완료 (응답: %s)", resp.text[:300])
         return True
     except Exception as e:
         log.error("카카오톡 발송 실패: %s", e)
