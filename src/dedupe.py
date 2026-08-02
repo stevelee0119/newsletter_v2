@@ -170,7 +170,8 @@ def dedupe(articles: list[dict], config: dict) -> list[dict]:
     return capped
 
 
-CONTENT_EXCERPT_CHARS = 1200  # Gemini/Claude에 넘길 본문 발췌 길이(비용·지연 통제)
+CONTENT_EXCERPT_CHARS = 500  # Gemini/Claude에 넘길 본문 발췌 길이(비용 통제 — 기사 서두에 핵심 정보가 몰려있는
+# 국내 뉴스 작성 관행(역피라미드 구조)상 500자로도 중복·과거 기사 판단에 충분한 신호가 됨)
 
 
 def _content_excerpt(article: dict) -> str:

@@ -84,6 +84,23 @@
 
 ---
 
+## 5-1. Gemini API 키 설정 (선택, 2단계 콘텐츠 중복·과거 기사 필터)
+
+미설정 시 이 단계만 자동으로 건너뛰고 나머지(수집·1차 중복제거·Claude 분류·발송)는 그대로 정상 작동합니다.
+
+1. https://aistudio.google.com/apikey 접속 → Google 계정으로 로그인
+2. **"Create API key"** → **"Create API key in new project"** 선택(기존 프로젝트를 선택하면 무료 할당량이 `0`으로 나올 수 있습니다)
+3. 생성된 키(`AIza...`로 시작) 복사
+4. Secrets 등록: `GEMINI_API_KEY`
+
+> **재실행해도 429(RESOURCE_EXHAUSTED, quota_limit_value: 0) 오류가 계속 난다면**: 새 프로젝트로도
+> 해결되지 않는 계정 차원의 문제일 수 있습니다. 아래를 확인하세요.
+> - [console.cloud.google.com/billing](https://console.cloud.google.com/billing)에서 해당 프로젝트에
+>   **결제 계정이 연결되어 있는지** 확인 (무료 한도 내 사용은 과금되지 않습니다 — 최근 정책상 결제
+>   계정 연결 자체가 무료 할당량 부여 조건인 경우가 있습니다)
+> - **Google Workspace(회사/조직) 계정**이라면 관리자가 Generative Language API 사용을 막아뒀을 수
+>   있습니다 — 이 경우 개인 Gmail 계정으로 새로 키를 발급하세요
+
 ## 6. 동작 확인
 
 1. 저장소 → **Actions** 탭 → `daily-newsletter` → **Run workflow** (수동 실행)
@@ -111,13 +128,15 @@
 - **수집 시효**: `config.yaml`의 `lookback_hours` (기본 24)
 - **발송 시각**: `.github/workflows/newsletter.yml`의 cron 및 `TARGET_SEND_TIME`
 - **발송 모드**: 같은 파일의 `DELIVERY_MODE` (`all`=카카오+Notion+텔레그램 / `fallback`=카카오 실패 시만 텔레그램, Notion은 항상 동시 시도)
-- **모델**: `config.yaml`의 `model` (기본 `claude-haiku-4-5`, 품질 우선 시 `claude-sonnet-5`)
+- **모델**: `config.yaml`의 `model` (기본 `claude-sonnet-5`, 비용 우선 시 `claude-haiku-4-5`), Gemini 2단계 모델은 `gemini_model`
+- **중복 판단 민감도**: `config.yaml`의 `dedupe_threshold` / `dedupe_overlap_threshold` / `dedupe_distinctive_idf`
 
 ## 9. 로컬 테스트
 
 ```bash
 pip install -r requirements.txt
 export ANTHROPIC_API_KEY=...
+export GEMINI_API_KEY=...                                 # 선택 (2단계 콘텐츠 필터)
 export TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=...        # 선택
 export NOTION_API_KEY=... NOTION_DATABASE_ID=...          # 선택
 python -m src.main run
