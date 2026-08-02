@@ -34,7 +34,7 @@
 | 실행 환경 | GitHub Actions (무료, 전원 불필요) |
 | 카카오톡 발송 | 카카오 개발자 API "나에게 보내기" (본인 수신, 무료) |
 | 분류·최종 중복판단 | Claude API (기본 모델: `claude-sonnet-5`, thinking 비활성화, config에서 변경 가능) |
-| 콘텐츠 기반 중복·과거 기사 판단 | Gemini API (선택, 기본 모델 `gemini-2.5-flash`, `GEMINI_API_KEY` 미설정 시 건너뜀) |
+| 콘텐츠 기반 중복·과거 기사 판단 | Gemini API (선택, 기본 모델 `gemini-3.5-flash`, `GEMINI_API_KEY` 미설정 시 건너뜀) |
 | 뉴스 소스 | 구글 뉴스 RSS (한국판, API 키 불필요) |
 | 기사 시효 | 발송 시각 기준 **24시간 이내 작성** 기사만 포함, 원문 페이지 실제 발행 시각으로 2차 재검증 |
 | 아카이브 동기화 | 카카오톡 발송과 **동시에** Notion 데이터베이스에 페이지 생성 |
@@ -190,7 +190,7 @@ GitHub Actions (cron 05:40 KST)
 | 키 | 설명 | 기본값 |
 |---|---|---|
 | `model` | 분류에 사용할 Claude 모델 | `claude-sonnet-5` |
-| `gemini_model` | 2단계 콘텐츠 필터에 사용할 Gemini 모델 | `gemini-2.5-flash` |
+| `gemini_model` | 2단계 콘텐츠 필터에 사용할 Gemini 모델 | `gemini-3.5-flash` |
 | `lookback_hours` | 수집 시효(시간) | 24 |
 | `candidate_limits` | 1차 중복 제거 후 카테고리별 후보 상한 | 특검25/국방60/법조60/판결25/일정15 |
 | `dedupe_threshold` | 제목 편집거리 유사도 임계값(rapidfuzz, 0~100) | 82 |
@@ -229,7 +229,8 @@ GitHub Actions (cron 05:40 KST)
 | **URL에 발행일이 없는 언론사(네이버 등)** | 이전 버전은 URL 임베디드 날짜에만 의존해 이 경우 신선도 재검증이 무력화됐음 → 원문 페이지 메타태그 기반 실제 발행 시각(`page_published`)을 최우선 신호로 추가해 해결 |
 | **본문 전체 수집에 따른 비용 증가** | 2단계(Gemini)·3단계(Claude) 모두 본문 발췌를 사용하면서 Claude 입력 토큰이 크게 증가한 사례 실측(후보 133건, `CONTENT_EXCERPT_CHARS`=1200자 기준 입력 ~13만 토큰, 실행당 ~$0.3). `CONTENT_EXCERPT_CHARS`를 500자로 낮춰 비용을 예산 범위로 재조정 — 늘릴수록 판단 품질↑·비용↑ 트레이드오프이므로 필요 시 재조정 |
 | **sonnet-5 thinking 기본 활성화** | thinking을 명시적으로 끄지 않으면 구조화 출력(JSON) 생성 전에 `max_tokens`를 소진해 빈 응답(StopIteration)으로 실패한 사례 있음 → `classify.py`에서 `thinking: {"type": "disabled"}` 명시로 해결 |
-| **Gemini 무료 할당량 0 문제** | 일부 Google Cloud 프로젝트/계정에서 새 프로젝트로 키를 재발급해도 `quota_limit_value: 0`이 지속되는 사례 확인(결제 계정 미연결 또는 Workspace 조직 정책 추정) → 코드는 이 경우도 그레이스풀 스킵으로 처리하므로 나머지 파이프라인엔 영향 없음. 해결은 SETUP.md 참조 |
+| **Gemini 무료 할당량 0 문제** | 일부 Google Cloud 프로젝트/계정에서 새 프로젝트로 키를 재발급해도 `quota_limit_value: 0`이 지속되는 사례 확인(결제 계정 연결·1시간 경과 후에도 미해결, 최종적으로 키를 재발급하자 해소) → 코드는 이 경우도 그레이스풀 스킵으로 처리하므로 나머지 파이프라인엔 영향 없음. 해결은 SETUP.md 참조 |
+| **Gemini 모델 버전 노후화(404)** | 신규 발급 키/프로젝트에서는 구버전 모델이 "no longer available to new users"로 404를 반환하는 사례 확인(`gemini-2.5-flash` → `gemini-3.5-flash`로 대응) → `gemini_model` config 값을 계정에서 실제 사용 가능한 모델로 주기적으로 갱신 필요, 확인 안 되면 이 역시 그레이스풀 스킵 |
 | Notion 데이터베이스 title 속성명 상이 | 사용자마다 "이름"/"Name" 등으로 다를 수 있어, 매 실행 시 DB 스키마를 조회해 title 타입 속성을 동적으로 탐지 |
 | Notion API 블록 수 제한(요청당 100개) | 전문을 문단 블록으로 변환 후 최초 100개는 페이지 생성 시, 나머지는 100개씩 배치로 append |
 | **원문 페이지 접근 실패(봇 차단 등)** | `resolve_links`가 개별 기사 단위로 실패해도 예외 전파 없이 `full_text`/`page_published`를 `None`으로 남기고 계속 진행 — 해당 기사는 RSS 요약(description) 및 Google `pubDate` 기준으로만 판단됨(신뢰도 하락은 감내) |

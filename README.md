@@ -85,7 +85,7 @@ python -m src.main run
 | 항목 | 설명 |
 |---|---|
 | `model` | 분류에 사용할 Claude 모델 (기본 `claude-sonnet-5`, thinking은 코드에서 비활성화) |
-| `gemini_model` | 2단계 콘텐츠 필터에 사용할 Gemini 모델 (기본 `gemini-2.5-flash`, `GEMINI_API_KEY` 미설정 시 건너뜀) |
+| `gemini_model` | 2단계 콘텐츠 필터에 사용할 Gemini 모델 (기본 `gemini-3.5-flash`, `GEMINI_API_KEY` 미설정 시 건너뜀) |
 | `lookback_hours` | 수집 시효 — 발송 시각 기준 몇 시간 이내 기사만 포함 (기본 24) |
 | `keywords` | 카테고리별 검색 키워드 목록 |
 | `candidate_limits` | 1차 중복 제거 후 다음 단계에 넘길 카테고리별 후보 상한 |

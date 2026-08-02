@@ -231,7 +231,7 @@ def gemini_content_dedupe(articles: list[dict], config: dict) -> list[dict]:
     try:
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model=config.get("gemini_model", "gemini-2.5-flash"),
+            model=config.get("gemini_model", "gemini-3.5-flash"),
             contents=prompt,
             config={"response_mime_type": "application/json", "response_json_schema": schema},
         )

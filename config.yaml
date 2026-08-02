@@ -9,7 +9,7 @@
 model: "claude-sonnet-5"
 
 # Gemini 2단계 콘텐츠 중복 필터에 사용할 모델 (GEMINI_API_KEY 미설정 시 건너뜀)
-gemini_model: "gemini-2.5-flash"
+gemini_model: "gemini-3.5-flash"
 
 # 수집 범위 — 발송 시각 기준 이내에 작성된 기사만 포함
 lookback_hours: 24
