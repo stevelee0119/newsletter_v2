@@ -104,7 +104,11 @@ def _media_rank(source: str, rank_list: list[str]) -> int:
 
 
 def _detail_score(article: dict) -> int:
-    return len(article.get("title", "")) + len(article.get("description", ""))
+    return (
+        len(article.get("title", ""))
+        + len(article.get("description", ""))
+        + len(article.get("full_text") or "")
+    )
 
 
 def dedupe(articles: list[dict], config: dict) -> list[dict]:
@@ -166,33 +170,50 @@ def dedupe(articles: list[dict], config: dict) -> list[dict]:
     return capped
 
 
+CONTENT_EXCERPT_CHARS = 1200  # Gemini/Claude에 넘길 본문 발췌 길이(비용·지연 통제)
+
+
+def _content_excerpt(article: dict) -> str:
+    """본문 전체(full_text)가 있으면 그걸, 없으면 RSS 요약(description)을 발췌."""
+    text = article.get("full_text") or article.get("description") or ""
+    return text[:CONTENT_EXCERPT_CHARS]
+
+
 def gemini_content_dedupe(articles: list[dict], config: dict) -> list[dict]:
-    """2단계 중복 제거 — Gemini로 제목이 달라도 내용이 같은 사건인 기사를 묶어 제거.
+    """2단계 필터 — Gemini로 본문 전체를 분석해 (1) 같은 사건 기사 병합, (2) 과거 기사 제외.
 
     1단계(dedupe)는 제목 유사도 기반이라 표현이 크게 다른 동일 사건 기사를
-    놓칠 수 있다. 이 단계는 요약(description)까지 넣어 Gemini에게 "같은
-    사건"인지 판단시켜 보완한다. GEMINI_API_KEY 미설정 시 건너뛴다(선택 기능).
+    놓칠 수 있다. 이 단계는 원문 본문 전체(resolve_links가 채워둔 full_text,
+    실패 시 RSS 요약으로 대체)를 근거로 Gemini에게 (1) 같은 사건인지, (2) 본문
+    내용상 이미 지난 사건을 다루는 과거 기사인지 판단시켜 보완한다.
+    GEMINI_API_KEY 미설정 시 건너뛴다(선택 기능).
     """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        log.info("Gemini API 키 없음 — 2단계 콘텐츠 중복 필터 건너뜀")
+        log.info("Gemini API 키 없음 — 2단계 콘텐츠 필터 건너뜀")
         return articles
     try:
         from google import genai
     except ImportError:
-        log.warning("google-genai 패키지 미설치 — 2단계 콘텐츠 중복 필터 건너뜀")
+        log.warning("google-genai 패키지 미설치 — 2단계 콘텐츠 필터 건너뜀")
         return articles
 
     payload = [
-        {"id": i, "title": a["title"], "description": a.get("description", "")[:200]}
+        {"id": i, "title": a["title"], "content": _content_excerpt(a)}
         for i, a in enumerate(articles)
     ]
     prompt = (
-        "다음은 오늘 수집된 국방·법무 뉴스 기사 후보 목록이다(id, 제목, 요약).\n"
-        "제목이 서로 크게 다르더라도 실제로는 같은 사건·발표·판결을 다루는 기사들을 "
-        "찾아 id로 그룹화하라. 단순히 같은 주제 범주(예: 둘 다 '특검' 관련)라는 "
-        "이유만으로 묶지 말고, 같은 특정 사건을 다루는 경우에만 묶는다. "
-        "중복이 없는 기사는 결과에 포함하지 않는다.\n\n"
+        "다음은 오늘 수집된 국방·법무 뉴스 기사 후보 목록이다(id, 제목, 본문 발췌).\n\n"
+        "[작업 1] 중복 묶기: 제목이 서로 크게 다르더라도 본문 내용상 실제로는 같은 "
+        "사건·발표·판결을 다루는 기사들을 찾아 id로 그룹화하라. 단순히 같은 주제 "
+        "범주(예: 둘 다 '특검' 관련)라는 이유만으로 묶지 말고, 같은 특정 사건을 "
+        "다루는 경우에만 묶는다.\n\n"
+        "[작업 2] 과거 기사 판단: 본문 내용상 오늘 새로 발생/발표된 사실이 아니라, "
+        "이미 며칠 전에 일어난 사건을 새로운 진전 없이 재정리·재보도하는 기사라면 "
+        "id를 stale_ids에 넣어라. 판단 근거는 본문에 명시된 구체적 날짜·시점 표현"
+        "(예: '지난 O일', '앞서 O일')이지, 단순히 배경 설명으로 과거를 언급하는 "
+        "것만으로는 과거 기사로 보지 않는다. 오늘 발표된 후속 진전·반응·분석 기사는 "
+        "과거 기사가 아니다. 애매하면 stale_ids에 넣지 말고 남겨라(과탈락 방지).\n\n"
         f"기사 목록:\n{json.dumps(payload, ensure_ascii=False)}"
     )
     schema = {
@@ -201,9 +222,10 @@ def gemini_content_dedupe(articles: list[dict], config: dict) -> list[dict]:
             "duplicate_groups": {
                 "type": "array",
                 "items": {"type": "array", "items": {"type": "integer"}},
-            }
+            },
+            "stale_ids": {"type": "array", "items": {"type": "integer"}},
         },
-        "required": ["duplicate_groups"],
+        "required": ["duplicate_groups", "stale_ids"],
     }
     try:
         client = genai.Client(api_key=api_key)
@@ -214,13 +236,17 @@ def gemini_content_dedupe(articles: list[dict], config: dict) -> list[dict]:
         )
         result = json.loads(response.text)
     except Exception as e:
-        log.warning("Gemini 콘텐츠 중복 필터 실패(건너뜀): %s", e)
+        log.warning("Gemini 콘텐츠 필터 실패(건너뜀): %s", e)
         return articles
 
+    stale = {i for i in result.get("stale_ids", []) if isinstance(i, int) and 0 <= i < len(articles)}
+    for i in stale:
+        log.info("Gemini 과거 기사로 판단해 제외: %s", articles[i]["title"][:40])
+
     rank_list = config.get("media_rank") or []
-    drop: set[int] = set()
+    drop: set[int] = set(stale)
     for group in result.get("duplicate_groups", []):
-        valid = [i for i in group if isinstance(i, int) and 0 <= i < len(articles)]
+        valid = [i for i in group if isinstance(i, int) and 0 <= i < len(articles) and i not in stale]
         if len(valid) < 2:
             continue
         valid.sort(key=lambda i: (_media_rank(articles[i]["source"], rank_list), -_detail_score(articles[i])))
@@ -228,5 +254,5 @@ def gemini_content_dedupe(articles: list[dict], config: dict) -> list[dict]:
 
     kept = [a for i, a in enumerate(articles) if i not in drop]
     if drop:
-        log.info("Gemini 2단계 중복 필터: %d건 -> %d건", len(articles), len(kept))
+        log.info("Gemini 2단계 필터(중복+과거 기사): %d건 -> %d건", len(articles), len(kept))
     return kept

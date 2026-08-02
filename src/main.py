@@ -70,12 +70,13 @@ def generate() -> bool:
         raise RuntimeError("수집된 기사가 없습니다 — RSS 접근을 확인하세요")
 
     candidates = dedupe(articles, config)
+    log.info("원문 링크 복원 및 본문 수집 중 (%d건)", len(candidates))
+    resolve_links(candidates)
     candidates = gemini_content_dedupe(candidates, config)
     sections, daily_summary = classify(candidates, config)
 
     selected = [a for arts in sections.values() for a in arts]
-    log.info("최종 선정: %d건 — 원문 링크 복원 중", len(selected))
-    resolve_links(selected)
+    log.info("최종 선정: %d건", len(selected))
 
     lookback_hours = config.get("lookback_hours", 24)
     total_before = sum(len(arts) for arts in sections.values())

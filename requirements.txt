@@ -5,3 +5,4 @@ anthropic>=0.60
 PyNaCl>=1.5
 googlenewsdecoder>=0.1.6
 google-genai>=0.3
+trafilatura>=2.0

@@ -66,25 +66,42 @@ def _parse_iso(text: str) -> datetime | None:
         return None
 
 
-def _fetch_page_published(url: str) -> datetime | None:
-    """기사 원문 페이지의 메타태그에서 실제 발행 시각을 추출(베스트 에포트).
+def _fetch_page_info(url: str) -> tuple[datetime | None, str | None]:
+    """기사 원문 페이지를 1회 요청해 (실제 발행 시각, 본문 전체 텍스트)를 추출.
 
+    발행 시각: 메타태그(article:published_time 등)에서 정규식으로 추출한다.
     URL에 날짜가 새겨져 있지 않은 언론사(네이버 뉴스 등 아이디 기반 URL 포함)
-    에도 적용 가능한, 더 신뢰도 높은 신선도 신호. 실패해도 예외를 전파하지
-    않고 None을 반환한다.
+    에도 적용 가능한, 더 신뢰도 높은 신선도 신호다.
+    본문: trafilatura로 광고/네비게이션 등을 제거한 본문만 추출한다(중복·과거
+    기사 판단을 제목만으로는 놓치는 경우를 보완하기 위해 Claude/Gemini에 전달).
+    둘 다 베스트 에포트이며 실패해도 예외를 전파하지 않고 None을 반환한다.
     """
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=10)
-        text = resp.text[:150_000]
+        resp = requests.get(url, headers=HEADERS, timeout=12)
+        html = resp.text
     except Exception:
-        return None
+        return None, None
+
+    published = None
     for pat in _META_DATE_PATTERNS:
-        m = pat.search(text)
+        m = pat.search(html[:150_000])
         if m:
             dt = _parse_iso(m.group(1))
             if dt:
-                return dt if dt.tzinfo else dt.replace(tzinfo=KST)
-    return None
+                published = dt if dt.tzinfo else dt.replace(tzinfo=KST)
+                break
+
+    full_text = None
+    try:
+        import trafilatura
+
+        full_text = trafilatura.extract(
+            html, url=url, include_comments=False, include_tables=False, favor_precision=True
+        )
+    except Exception as e:
+        log.debug("본문 추출 실패 (%s): %s", url, e)
+
+    return published, full_text
 
 
 def _clean_title(title: str, source: str) -> str:
@@ -154,13 +171,16 @@ def collect_all(config: dict) -> list[dict]:
     return results
 
 
-def resolve_links(articles: list[dict], max_workers: int = 8) -> None:
+def resolve_links(articles: list[dict], max_workers: int = 12) -> None:
     """구글 뉴스 리다이렉트 링크를 언론사 원문 링크로 복원(베스트 에포트).
 
-    선정된 소수의 기사에 대해서만 호출할 것. 실패 시 구글 링크 유지.
-    원문 링크 복원에 성공하면 그 페이지의 메타태그에서 실제 발행 시각도 함께
-    읽어와 article["page_published"]에 저장한다(filter_resolved_freshness가
-    사용하는 2차 안전망 — URL에 날짜가 없는 언론사에도 적용됨).
+    1차 중복 제거를 통과한 후보 전체(수십~백여 건)에 대해 호출한다 — 이후
+    Gemini 2단계 중복/과거 기사 판단과 Claude 분류 단계가 여기서 채워지는
+    article["full_text"](본문 전체)와 article["page_published"](실제 발행
+    시각)를 사용하므로, 최종 발송 전 소수에게만 적용하던 이전 방식에서
+    앞당겨 실행하도록 바뀌었다. 실패해도 예외를 전파하지 않고 구글 링크를
+    유지하며 full_text/page_published는 None으로 남는다(호출부는 이를 보고
+    description 등으로 대체).
     """
     try:
         from googlenewsdecoder import gnewsdecoder
@@ -186,7 +206,10 @@ def resolve_links(articles: list[dict], max_workers: int = 8) -> None:
                     log.debug("링크 리다이렉트 실패 (%s): %s", article["title"][:30], e)
 
         if "news.google.com" not in article["link"]:
-            article["page_published"] = _fetch_page_published(article["link"])
+            published, full_text = _fetch_page_info(article["link"])
+            article["page_published"] = published
+            if full_text:
+                article["full_text"] = full_text
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         list(pool.map(_resolve, articles))
