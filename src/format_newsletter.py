@@ -90,18 +90,31 @@ def format_newsletter(sections: dict[str, list[dict]], config: dict, now: dateti
     return "\n".join(text_lines).strip() + "\n"
 
 
-def format_summary(sections: dict[str, list[dict]], now: datetime, max_len: int = 180) -> str:
-    """카카오톡 텍스트 템플릿(200자 제한)용 헤드라인 요약."""
+def format_summary(
+    now: datetime, daily_summary: str, link_url: str, max_len: int = 200
+) -> str:
+    """카카오톡 텍스트 템플릿(200자 제한)용 요약.
+
+    링크는 버튼 렌더링 여부와 무관하게 항상 보이도록 본문 텍스트에도 그대로
+    노출한다(카카오톡은 텍스트 안의 URL을 자동으로 하이퍼링크 처리한다).
+    링크 줄은 절대 잘리지 않도록 예산을 먼저 확보하고, 남는 길이만큼만
+    daily_summary를 채운다.
+    """
     head = f"🗞️ {_header_date(now)} 국방·법무 브리핑"
-    picks: list[str] = []
-    for key in ("special_counsel", "defense_general", "law_judiciary_agencies", "rulings"):
-        arts = sections.get(key) or []
-        if arts:
-            picks.append("· " + arts[0]["title"])
-    text = head
-    for p in picks:
-        candidate = text + "\n" + p
-        if len(candidate) > max_len:
-            break
-        text = candidate
-    return text
+    link_line = f"▶ 전체 보기: {link_url}" if link_url else ""
+
+    reserved = len(head) + len(link_line) + (2 if link_line else 1)
+    remaining = max_len - reserved
+    summary = daily_summary.strip()
+    if remaining > 0 and summary:
+        if len(summary) > remaining:
+            summary = summary[: max(remaining - 1, 0)].rstrip() + "…"
+    else:
+        summary = ""
+
+    parts = [head]
+    if summary:
+        parts.append(summary)
+    if link_line:
+        parts.append(link_line)
+    return "\n".join(parts)

@@ -74,7 +74,12 @@ def _kakao_refresh_access_token() -> str | None:
 
 
 def send_kakao(summary: str, link_url: str) -> bool:
-    """카카오톡 '나에게 보내기' — 요약 + 전체보기 링크."""
+    """카카오톡 '나에게 보내기' — 요약 + 전체보기 링크.
+
+    summary에는 이미 링크가 본문 텍스트로 포함되어 있다(버튼 렌더링 여부와
+    무관하게 항상 보이도록). 버튼은 보조 수단으로 buttons 배열을 사용한다
+    (button_title 단일 필드보다 최신 문서 기준 필드).
+    """
     try:
         access_token = _kakao_refresh_access_token()
         if not access_token:
@@ -86,8 +91,11 @@ def send_kakao(summary: str, link_url: str) -> bool:
             "object_type": "text",
             "text": summary[:200],
             "link": {"web_url": link_url, "mobile_web_url": link_url},
-            "button_title": "전체 보기",
         }
+        if link_url:
+            template["buttons"] = [
+                {"title": "전체 보기", "link": {"web_url": link_url, "mobile_web_url": link_url}}
+            ]
         log.info("카카오톡 전송 템플릿: %s", json.dumps(template, ensure_ascii=False))
         resp = requests.post(
             KAKAO_MEMO_URL,

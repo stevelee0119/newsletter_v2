@@ -53,23 +53,27 @@ SYSTEM_PROMPT = """당신은 국방·법무 분야 일간 뉴스 브리핑의 �
 4. 섹션 내 순서는 중요도(정책적 파급력, 독자 관련성) 순으로 정렬한다.
 5. 섹션별 최대 기사 수: {limits}
 6. 판결 기사(rulings)는 구체적 판결·결정 내용이 있는 기사만. 기관 동향은 law_judiciary_agencies로.
-7. 결과는 섹션 키별 기사 id 배열(JSON)로만 출력한다. 존재하지 않는 id를 만들지 마라."""
+7. 결과는 섹션 키별 기사 id 배열(JSON)과 daily_summary 필드로 출력한다. 존재하지 않는 id를 만들지 마라.
+8. daily_summary: 오늘 전체 기사 중 가장 중요한 흐름을 하나의 자연스러운 한국어 문장으로
+   요약하라. 130자 이내, 구체적 사건·인물 중심으로 쓰고 "다양한 소식이 있었다" 같은
+   상투적 문구는 쓰지 마라. 카카오톡 푸시 알림에 그대로 노출되는 문장이다."""
 
 
 def _schema() -> dict:
     props = {
         k: {"type": "array", "items": {"type": "integer"}} for k in SECTION_KEYS
     }
+    props["daily_summary"] = {"type": "string"}
     return {
         "type": "object",
         "properties": props,
-        "required": SECTION_KEYS,
+        "required": [*SECTION_KEYS, "daily_summary"],
         "additionalProperties": False,
     }
 
 
-def classify(candidates: list[dict], config: dict) -> dict[str, list[dict]]:
-    """후보 기사를 섹션별로 배치해 {section_key: [기사]} 반환."""
+def classify(candidates: list[dict], config: dict) -> tuple[dict[str, list[dict]], str]:
+    """후보 기사를 섹션별로 배치해 ({section_key: [기사]}, daily_summary)를 반환."""
     limits = config.get("section_limits") or {}
     client = anthropic.Anthropic()
 
@@ -92,6 +96,7 @@ def classify(candidates: list[dict], config: dict) -> dict[str, list[dict]]:
     response = client.messages.create(
         model=config.get("model", "claude-haiku-4-5"),
         max_tokens=8000,
+        thinking={"type": "disabled"},
         system=system,
         output_config={"format": {"type": "json_schema", "schema": _schema()}},
         messages=[
@@ -131,4 +136,5 @@ def classify(candidates: list[dict], config: dict) -> dict[str, list[dict]]:
                 used.add(i)
         limit = limits.get(key)
         sections[key] = picked[:limit] if limit else picked
-    return sections
+    daily_summary = str(result.get("daily_summary") or "").strip()
+    return sections, daily_summary

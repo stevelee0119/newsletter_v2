@@ -1,11 +1,15 @@
 # 국방·법무 뉴스레터 설정
 
-# Claude 모델 (비용/품질에 따라 변경 가능: claude-sonnet-5 등)
-# 2026-08-02: claude-sonnet-5로 변경 직후 첫 실행이 분류 응답에 text 블록이
-# 없어 StopIteration으로 실패(classify.py 진단 로그 보강 완료). 안정성이
-# 검증된 haiku-4-5로 되돌림 — 재전환 시 다음 실패 로그의 stop_reason/블록
-# 타입을 먼저 확인할 것.
-model: "claude-haiku-4-5"
+# Claude 모델 (비용/품질에 따라 변경 가능: claude-haiku-4-5 등)
+# 2026-08-02: claude-sonnet-5 전환 직후 thinking이 기본 활성화된 상태로
+# max_tokens=8000을 다 써버려 StopIteration으로 실패한 적 있음(classify.py
+# 진단 로그 보강 완료). classify.py에서 thinking을 명시적으로 비활성화
+# (thinking={"type": "disabled"})해 재발을 막고 다시 sonnet-5로 전환함 —
+# 실측 토큰 기준 월 예상 비용 ~$4, haiku 대비 중복/분류 판단 품질이 더 좋음.
+model: "claude-sonnet-5"
+
+# Gemini 2단계 콘텐츠 중복 필터에 사용할 모델 (GEMINI_API_KEY 미설정 시 건너뜀)
+gemini_model: "gemini-2.5-flash"
 
 # 수집 범위 — 발송 시각 기준 이내에 작성된 기사만 포함
 lookback_hours: 24

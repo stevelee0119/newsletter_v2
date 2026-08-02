@@ -15,7 +15,9 @@ LLM 호출 전에 후보 수를 줄여 토큰·시간을 절약한다.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import re
 
 from rapidfuzz import fuzz
@@ -118,3 +120,69 @@ def dedupe(articles: list[dict], config: dict) -> list[dict]:
         len(articles), len(unique), len(representatives), len(capped),
     )
     return capped
+
+
+def gemini_content_dedupe(articles: list[dict], config: dict) -> list[dict]:
+    """2단계 중복 제거 — Gemini로 제목이 달라도 내용이 같은 사건인 기사를 묶어 제거.
+
+    1단계(dedupe)는 제목 유사도 기반이라 표현이 크게 다른 동일 사건 기사를
+    놓칠 수 있다. 이 단계는 요약(description)까지 넣어 Gemini에게 "같은
+    사건"인지 판단시켜 보완한다. GEMINI_API_KEY 미설정 시 건너뛴다(선택 기능).
+    """
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        log.info("Gemini API 키 없음 — 2단계 콘텐츠 중복 필터 건너뜀")
+        return articles
+    try:
+        from google import genai
+    except ImportError:
+        log.warning("google-genai 패키지 미설치 — 2단계 콘텐츠 중복 필터 건너뜀")
+        return articles
+
+    payload = [
+        {"id": i, "title": a["title"], "description": a.get("description", "")[:200]}
+        for i, a in enumerate(articles)
+    ]
+    prompt = (
+        "다음은 오늘 수집된 국방·법무 뉴스 기사 후보 목록이다(id, 제목, 요약).\n"
+        "제목이 서로 크게 다르더라도 실제로는 같은 사건·발표·판결을 다루는 기사들을 "
+        "찾아 id로 그룹화하라. 단순히 같은 주제 범주(예: 둘 다 '특검' 관련)라는 "
+        "이유만으로 묶지 말고, 같은 특정 사건을 다루는 경우에만 묶는다. "
+        "중복이 없는 기사는 결과에 포함하지 않는다.\n\n"
+        f"기사 목록:\n{json.dumps(payload, ensure_ascii=False)}"
+    )
+    schema = {
+        "type": "object",
+        "properties": {
+            "duplicate_groups": {
+                "type": "array",
+                "items": {"type": "array", "items": {"type": "integer"}},
+            }
+        },
+        "required": ["duplicate_groups"],
+    }
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=config.get("gemini_model", "gemini-2.5-flash"),
+            contents=prompt,
+            config={"response_mime_type": "application/json", "response_json_schema": schema},
+        )
+        result = json.loads(response.text)
+    except Exception as e:
+        log.warning("Gemini 콘텐츠 중복 필터 실패(건너뜀): %s", e)
+        return articles
+
+    rank_list = config.get("media_rank") or []
+    drop: set[int] = set()
+    for group in result.get("duplicate_groups", []):
+        valid = [i for i in group if isinstance(i, int) and 0 <= i < len(articles)]
+        if len(valid) < 2:
+            continue
+        valid.sort(key=lambda i: (_media_rank(articles[i]["source"], rank_list), -_detail_score(articles[i])))
+        drop.update(valid[1:])
+
+    kept = [a for i, a in enumerate(articles) if i not in drop]
+    if drop:
+        log.info("Gemini 2단계 중복 필터: %d건 -> %d건", len(articles), len(kept))
+    return kept

@@ -26,7 +26,7 @@ import yaml
 
 from .classify import classify
 from .collect import collect_all, filter_resolved_freshness, resolve_links
-from .dedupe import dedupe
+from .dedupe import dedupe, gemini_content_dedupe
 from .deliver import deliver
 from .format_newsletter import format_newsletter, format_summary
 
@@ -48,6 +48,13 @@ def _archive_path(now: datetime) -> Path:
     return ARCHIVE_DIR / f"{now.strftime('%Y-%m-%d')}.md"
 
 
+def _link_url(now: datetime) -> str:
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    if repo:
+        return f"https://github.com/{repo}/blob/main/newsletters/{now.strftime('%Y-%m-%d')}.md"
+    return "https://github.com"
+
+
 def generate() -> bool:
     """뉴스레터 생성. 이미 당일분이 있으면 False(스킵)."""
     now = datetime.now(KST)
@@ -63,7 +70,8 @@ def generate() -> bool:
         raise RuntimeError("수집된 기사가 없습니다 — RSS 접근을 확인하세요")
 
     candidates = dedupe(articles, config)
-    sections = classify(candidates, config)
+    candidates = gemini_content_dedupe(candidates, config)
+    sections, daily_summary = classify(candidates, config)
 
     selected = [a for arts in sections.values() for a in arts]
     log.info("최종 선정: %d건 — 원문 링크 복원 중", len(selected))
@@ -78,7 +86,7 @@ def generate() -> bool:
         log.info("발행일 재검증으로 %d건 제외 (%d -> %d)", total_before - total_after, total_before, total_after)
 
     full_text = format_newsletter(sections, config, now)
-    summary = format_summary(sections, now)
+    summary = format_summary(now, daily_summary, _link_url(now))
 
     OUT_DIR.mkdir(exist_ok=True)
     ARCHIVE_DIR.mkdir(exist_ok=True)
@@ -114,12 +122,7 @@ def send() -> None:
         return
 
     now = datetime.now(KST)
-    repo = os.environ.get("GITHUB_REPOSITORY", "")
-    link_url = (
-        f"https://github.com/{repo}/blob/main/newsletters/{now.strftime('%Y-%m-%d')}.md"
-        if repo
-        else "https://github.com"
-    )
+    link_url = _link_url(now)
     title = f"{now.strftime('%Y-%m-%d')} 국방·법무 주요 뉴스 브리핑"
 
     _wait_until_target()
