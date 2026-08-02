@@ -4,8 +4,15 @@ LLM 호출 전에 후보 수를 줄여 토큰·시간을 절약한다.
 
 같은 사건을 다룬 기사라도 언론사마다 제목을 크게 다르게 쓰는 경우(인용구,
 관점, 부가 설명 차이)가 많아 문자열 편집거리 기반 유사도(token_set_ratio)만
-으로는 놓치는 중복이 많다. 이를 보완하기 위해 핵심 명사(2글자 이상 어절)
-겹침 비율(overlap coefficient)을 보조 신호로 함께 사용한다.
+으로는 놓치는 중복이 많다. 이를 보완하기 위해 두 가지 보조 신호를 함께
+사용한다:
+1) 핵심 명사(2글자 이상 어절) 겹침 비율(overlap coefficient) — 전체적으로
+   제목이 비슷한 경우를 잡는다.
+2) 특이 공유 어절(distinctive shared token) — "림팩", "윤한홍"처럼 이번
+   배치 전체에서 드물게만 등장하는(문서빈도가 낮은) 단어를 두 제목이 공유
+   하면, 나머지 표현이 크게 달라 전체 겹침 비율은 낮더라도 같은 사건일
+   가능성이 매우 높다고 판단한다("특검", "조사"처럼 흔한 단어는 문서빈도가
+   높아 이 신호에 기여하지 않는다).
 
 기사가 어떤 키워드로 수집됐는지(category)는 중복 판단과 무관하다 — 같은
 사건이 서로 다른 키워드(예: "특검"과 "대통령")로 각각 수집될 수 있으므로,
@@ -17,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 
@@ -39,6 +47,30 @@ def _significant_tokens(norm_title: str) -> set[str]:
     return {w for w in norm_title.split() if len(w) >= 2}
 
 
+def _document_frequency(token_sets: list[set[str]]) -> dict[str, int]:
+    df: dict[str, int] = {}
+    for tokens in token_sets:
+        for t in tokens:
+            df[t] = df.get(t, 0) + 1
+    return df
+
+
+def _has_distinctive_shared_token(
+    tokens_a: set[str], tokens_b: set[str], df: dict[str, int], n_docs: int, min_idf: float
+) -> bool:
+    """두 제목이 이번 배치에서 드문(고유한) 단어를 공유하는지 판단.
+
+    "특검", "조사"처럼 배치 전체에 흔한 단어는 문서빈도(df)가 높아 idf가
+    낮으므로 신호에 기여하지 않고, "림팩", "윤한홍"처럼 소수 기사에만
+    등장하는 단어는 idf가 높아 하나만 공유해도 같은 사건 신호로 취급한다.
+    """
+    for t in tokens_a & tokens_b:
+        idf = math.log((n_docs + 1) / (df.get(t, 1) + 1))
+        if idf >= min_idf:
+            return True
+    return False
+
+
 def _is_similar(
     norm_a: str,
     tokens_a: set[str],
@@ -47,17 +79,21 @@ def _is_similar(
     threshold: float,
     overlap_threshold: float,
     min_shared_tokens: int,
+    df: dict[str, int],
+    n_docs: int,
+    distinctive_idf: float,
 ) -> bool:
-    """두 제목이 같은 사건을 다루는지 판단 (편집거리 유사도 OR 핵심어 겹침)."""
+    """두 제목이 같은 사건을 다루는지 판단 (편집거리 유사도 OR 핵심어 겹침 OR 특이 공유 어절)."""
     if fuzz.token_set_ratio(norm_a, norm_b) >= threshold:
         return True
     if not tokens_a or not tokens_b:
         return False
     shared = tokens_a & tokens_b
-    if len(shared) < min_shared_tokens:
-        return False
-    overlap = len(shared) / min(len(tokens_a), len(tokens_b)) * 100
-    return overlap >= overlap_threshold
+    if len(shared) >= min_shared_tokens:
+        overlap = len(shared) / min(len(tokens_a), len(tokens_b)) * 100
+        if overlap >= overlap_threshold:
+            return True
+    return _has_distinctive_shared_token(tokens_a, tokens_b, df, n_docs, distinctive_idf)
 
 
 def _media_rank(source: str, rank_list: list[str]) -> int:
@@ -77,6 +113,7 @@ def dedupe(articles: list[dict], config: dict) -> list[dict]:
     threshold = config.get("dedupe_threshold", 82)
     overlap_threshold = config.get("dedupe_overlap_threshold", 40)
     min_shared_tokens = config.get("dedupe_min_shared_tokens", 2)
+    distinctive_idf = config.get("dedupe_distinctive_idf", 3.0)
 
     # 1) 동일 URL / 동일 (제목, 언론사) 제거 — 키워드가 달라 중복 수집된 경우
     seen: dict[tuple, dict] = {}
@@ -89,14 +126,21 @@ def dedupe(articles: list[dict], config: dict) -> list[dict]:
     # 2) 언론사 순위 → 상세도 순으로 정렬 후 그리디 클러스터링 (카테고리 무관)
     unique.sort(key=lambda a: (_media_rank(a["source"], rank_list), -_detail_score(a)))
 
+    # 배치 전체 기준 문서빈도 — 특이 공유 어절 판단에 사용(대표 선정 여부와 무관하게 고정)
+    all_tokens = [_significant_tokens(normalize_title(a["title"])) for a in unique]
+    df = _document_frequency(all_tokens)
+    n_docs = len(unique)
+
     representatives: list[dict] = []
     norm_cache: list[str] = []
     tokens_cache: list[set[str]] = []
-    for a in unique:
+    for a, tokens in zip(unique, all_tokens):
         norm = normalize_title(a["title"])
-        tokens = _significant_tokens(norm)
         is_dup = any(
-            _is_similar(norm, tokens, rep_norm, rep_tokens, threshold, overlap_threshold, min_shared_tokens)
+            _is_similar(
+                norm, tokens, rep_norm, rep_tokens,
+                threshold, overlap_threshold, min_shared_tokens, df, n_docs, distinctive_idf,
+            )
             for rep_norm, rep_tokens in zip(norm_cache, tokens_cache)
         )
         if not is_dup:
