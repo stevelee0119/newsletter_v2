@@ -2,8 +2,8 @@ name: daily-newsletter
 
 on:
   schedule:
-    # 본 실행: UTC 20:40 = KST 05:40 (Actions 지연 버퍼 포함, 06:28 KST에 발송)
-    - cron: "40 20 * * *"
+    # 본 실행: UTC 20:27 = KST 05:27 (Actions 지연 버퍼 포함, 06:28 KST에 발송)
+    - cron: "27 20 * * *"
     # 백업 실행: UTC 21:45 = KST 06:45 (본 실행이 실패한 경우에만 생성·즉시 발송)
     - cron: "45 21 * * *"
   workflow_dispatch:
