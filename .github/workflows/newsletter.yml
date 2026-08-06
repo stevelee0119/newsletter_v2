@@ -2,9 +2,15 @@ name: daily-newsletter
 
 on:
   schedule:
-    # 본 실행: UTC 20:27 = KST 05:27 (Actions 지연 버퍼 포함, 06:28 KST에 발송)
-    - cron: "27 20 * * *"
-    # 백업 실행: UTC 21:45 = KST 06:45 (본 실행이 실패한 경우에만 생성·즉시 발송)
+    # 본 실행: GitHub Actions schedule 이벤트 자체의 지연(수십~90분+, workflow_dispatch보다
+    # 훨씬 느린 별도 큐)을 흡수하기 위해 05:27~05:55 KST 사이 4회 분산 시도.
+    # main.py generate()가 오늘자 아카이브 존재 시 즉시 스킵하므로 먼저 지연 없이 걸린
+    # 하나만 실제로 생성·발송하고 나머지는 1초 내 스킵 — 중복 발송 없음.
+    - cron: "27 20 * * *"  # KST 05:27
+    - cron: "35 20 * * *"  # KST 05:35
+    - cron: "45 20 * * *"  # KST 05:45
+    - cron: "55 20 * * *"  # KST 05:55
+    # 백업 실행: UTC 21:45 = KST 06:45 (그래도 실패한 경우 마지막 안전망)
     - cron: "45 21 * * *"
   workflow_dispatch:
 
