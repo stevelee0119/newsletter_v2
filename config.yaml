@@ -6,10 +6,10 @@
 # 진단 로그 보강 완료). classify.py에서 thinking을 명시적으로 비활성화
 # (thinking={"type": "disabled"})해 재발을 막고 다시 sonnet-5로 전환함 —
 # 실측 토큰 기준 월 예상 비용 ~$4, haiku 대비 중복/분류 판단 품질이 더 좋음.
-model: "claude-sonnet-5"
+model: "claude-opus-5"
 
 # Gemini 2단계 콘텐츠 중복 필터에 사용할 모델 (GEMINI_API_KEY 미설정 시 건너뜀)
-gemini_model: "gemini-3.5-flash"
+gemini_model: "gemini-3.7-flash"
 
 # 수집 범위 — 발송 시각 기준 이내에 작성된 기사만 포함
 lookback_hours: 24
