@@ -193,7 +193,7 @@ def resolve_links(articles: list[dict], max_workers: int = 12) -> None:
             if gnewsdecoder is not None:
                 try:
                     result = gnewsdecoder(url, interval=0)
-                    if result.get("status") and result.get("decoded_url"):
+                    if result.get("success") and result.get("decoded_url"):
                         article["link"] = result["decoded_url"]
                 except Exception as e:
                     log.debug("링크 디코딩 실패 (%s): %s", article["title"][:30], e)
@@ -213,6 +213,14 @@ def resolve_links(articles: list[dict], max_workers: int = 12) -> None:
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         list(pool.map(_resolve, articles))
+
+    unresolved = sum(1 for a in articles if "news.google.com" in a["link"])
+    if unresolved:
+        log.warning(
+            "구글 뉴스 링크 복원 실패: %d/%d건 — googlenewsdecoder 응답 스키마 변경 등으로 "
+            "복원 로직이 조용히 무력화됐을 수 있으니 gnewsdecoder() 반환값을 직접 확인할 것",
+            unresolved, len(articles),
+        )
 
 
 def filter_resolved_freshness(articles: list[dict], lookback_hours: int) -> list[dict]:
