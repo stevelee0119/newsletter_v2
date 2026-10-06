@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import email.utils
+import json
 import logging
 import re
 import urllib.parse
@@ -171,32 +172,112 @@ def collect_all(config: dict) -> list[dict]:
     return results
 
 
-def resolve_links(articles: list[dict], max_workers: int = 12) -> None:
-    """구글 뉴스 리다이렉트 링크를 언론사 원문 링크로 복원(베스트 에포트).
+def _decode_google_news_standalone(url: str) -> str | None:
+    """구글 뉴스 RSS 암호화 링크를 외부 라이브러리 없이 자체 복원(2차 안전망).
 
-    1차 중복 제거를 통과한 후보 전체(수십~백여 건)에 대해 호출한다 — 이후
-    Gemini 2단계 중복/과거 기사 판단과 Claude 분류 단계가 여기서 채워지는
+    googlenewsdecoder 라이브러리가 간접 의존성 충돌(예: selectolax deprecation)이나
+    API 스키마 변경으로 실패할 때를 대비한 독립 실행 디코더.
+    Google News batchexecute RPC 엔드포인트를 직접 호출해 원문 언론사 URL을 복원한다.
+    """
+    # 1. 기사 고유 식별자(ID) 추출
+    match = re.search(r"articles/([^/?]+)", url)
+    if not match:
+        return None
+    art_id = match.group(1)
+
+    page_url = f"https://news.google.com/rss/articles/{art_id}"
+    try:
+        # 2. 기사 페이지 요청하여 RPC 요청용 서명(signature)과 타임스탬프 파싱
+        resp = requests.get(page_url, headers=HEADERS, timeout=10)
+        if resp.status_code != 200:
+            return None
+        sg_m = re.search(r'data-n-a-sg="([^"]+)"', resp.text)
+        ts_m = re.search(r'data-n-a-ts="([^"]+)"', resp.text)
+        if not (sg_m and ts_m):
+            return None
+        sig, ts = sg_m.group(1), ts_m.group(1)
+
+        # 3. Google News batchexecute RPC 요청 본문 구성
+        ctx = [
+            ["X", "X", ["X", "X"], None, None, 1, 1, "US:en", None, 1, None, None, None, None, None, 0, 1],
+            "X", "X", 1, [1, 1, 1], 1, 1, None, 0, 0, None, 0,
+        ]
+        inner = ["garturlreq", ctx, art_id, int(ts) if ts.isdigit() else ts, sig]
+        envelopes = [["Fbv4je", json.dumps(inner, separators=(",", ":")), None, "0"]]
+        body = f"f.req={urllib.parse.quote(json.dumps([envelopes], separators=(',', ':')))}"
+
+        # 4. Google RPC 엔드포인트 호출
+        post_resp = requests.post(
+            "https://news.google.com/_/DotsSplashUi/data/batchexecute",
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                **HEADERS,
+            },
+            data=body,
+            timeout=10,
+        )
+        if post_resp.status_code != 200:
+            return None
+
+        # 5. RPC 응답 파싱 및 원문 URL 추출
+        text = post_resp.text
+        if "\n\n" in text:
+            text = text.split("\n\n", 1)[1]
+        text = text.lstrip()
+        if text.startswith(")]}'"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[4:]
+        data = json.loads(text.lstrip())
+
+        for row in data:
+            if isinstance(row, list) and len(row) >= 3 and (row[0] == "wrb.fr" or (len(row) > 1 and row[1] == "Fbv4je")):
+                payload = json.loads(row[2]) if isinstance(row[2], str) else row[2]
+                if isinstance(payload, list) and len(payload) >= 2 and payload[0] == "garturlres":
+                    return payload[1]
+    except Exception as e:
+        log.debug("자체 구글 뉴스 링크 복원 실패 (%s): %s", url[:40], e)
+    return None
+
+
+def resolve_links(articles: list[dict], max_workers: int = 12) -> None:
+    """기사의 구글 뉴스 리다이렉트 링크를 실제 원문 URL로 병렬 복원하고,
+    복원 성공 시 원문 페이지 메타태그에서 실제 발행 시각과 본문 전체를 추출.
+
+    Gemini 2차 중복 제거와 Claude 3단계 상세 분류가 구글 RSS snippet 대신
     article["full_text"](본문 전체)와 article["page_published"](실제 발행
     시각)를 사용하므로, 최종 발송 전 소수에게만 적용하던 이전 방식에서
     앞당겨 실행하도록 바뀌었다. 실패해도 예외를 전파하지 않고 구글 링크를
     유지하며 full_text/page_published는 None으로 남는다(호출부는 이를 보고
     description 등으로 대체).
     """
+    # 1. 서드파티 라이브러리 googlenewsdecoder 로드 시도
     try:
         from googlenewsdecoder import gnewsdecoder
-    except ImportError:
+    except Exception as e:
+        log.warning("googlenewsdecoder 모듈 로드 실패(자체 내장 디코더로 대체 사용): %s", e)
         gnewsdecoder = None
 
     def _resolve(article: dict) -> None:
         url = article["link"]
         if "news.google.com" in url:
+            # 1차 시도: googlenewsdecoder (버전별 status/success 키 모두 호환)
             if gnewsdecoder is not None:
                 try:
                     result = gnewsdecoder(url, interval=0)
-                    if result.get("success") and result.get("decoded_url"):
+                    if (result.get("success") or result.get("status")) and result.get("decoded_url"):
                         article["link"] = result["decoded_url"]
                 except Exception as e:
-                    log.debug("링크 디코딩 실패 (%s): %s", article["title"][:30], e)
+                    log.debug("googlenewsdecoder 복원 실패 (%s): %s", article["title"][:30], e)
+
+            # 2차 시도: 외부 라이브러리 실패 시 자체 내장 디코더로 복원
+            if "news.google.com" in article["link"]:
+                try:
+                    standalone_url = _decode_google_news_standalone(url)
+                    if standalone_url:
+                        article["link"] = standalone_url
+                except Exception as e:
+                    log.debug("자체 내장 디코더 복원 실패 (%s): %s", article["title"][:30], e)
+
+            # 3차 시도: HTTP 리다이렉트 추적
             if "news.google.com" in article["link"]:
                 try:
                     resp = requests.get(url, headers=HEADERS, timeout=15, allow_redirects=True)
@@ -205,6 +286,7 @@ def resolve_links(articles: list[dict], max_workers: int = 12) -> None:
                 except Exception as e:
                     log.debug("링크 리다이렉트 실패 (%s): %s", article["title"][:30], e)
 
+        # 원문 URL 복원 성공 시 실제 발행 시각과 본문 추출
         if "news.google.com" not in article["link"]:
             published, full_text = _fetch_page_info(article["link"])
             article["page_published"] = published
@@ -217,8 +299,7 @@ def resolve_links(articles: list[dict], max_workers: int = 12) -> None:
     unresolved = sum(1 for a in articles if "news.google.com" in a["link"])
     if unresolved:
         log.warning(
-            "구글 뉴스 링크 복원 실패: %d/%d건 — googlenewsdecoder 응답 스키마 변경 등으로 "
-            "복원 로직이 조용히 무력화됐을 수 있으니 gnewsdecoder() 반환값을 직접 확인할 것",
+            "구글 뉴스 링크 복원 실패: %d/%d건 — 모든 복원 단계(1차/2차/3차) 실패",
             unresolved, len(articles),
         )
 
