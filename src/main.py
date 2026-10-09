@@ -2,7 +2,7 @@
 
 사용법:
     python -m src.main generate   # 수집 -> 중복제거 -> 분류 -> 조판, 파일 산출
-    python -m src.main send       # 목표 시각(기본 06:28 KST)까지 대기 후 발송
+    python -m src.main send       # 생성된 산출물을 즉시 발송
     python -m src.main run        # generate + send (로컬 테스트용)
 
 generate 산출물:
@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 import os
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -98,23 +97,6 @@ def generate() -> bool:
     return True
 
 
-def _wait_until_target() -> None:
-    """TARGET_SEND_TIME(KST, 기본 06:28)까지 대기. 이미 지났으면 즉시 반환."""
-    target_str = os.environ.get("TARGET_SEND_TIME", "06:28")
-    max_wait_min = int(os.environ.get("MAX_WAIT_MIN", "55"))
-    hh, mm = map(int, target_str.split(":"))
-
-    now = datetime.now(KST)
-    target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-    wait_sec = (target - now).total_seconds()
-    if wait_sec <= 0:
-        log.info("목표 시각(%s KST) 경과 — 즉시 발송", target_str)
-        return
-    wait_sec = min(wait_sec, max_wait_min * 60)
-    log.info("발송 대기: %.0f초 (목표 %s KST)", wait_sec, target_str)
-    time.sleep(wait_sec)
-
-
 def send() -> None:
     full_path = OUT_DIR / "newsletter.txt"
     summary_path = OUT_DIR / "summary.txt"
@@ -125,8 +107,6 @@ def send() -> None:
     now = datetime.now(KST)
     link_url = _link_url(now)
     title = f"{now.strftime('%Y-%m-%d')} 국방·법무 주요 뉴스 브리핑"
-
-    _wait_until_target()
 
     ok = deliver(
         summary=summary_path.read_text(encoding="utf-8"),
