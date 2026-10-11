@@ -2,11 +2,8 @@ name: daily-newsletter
 
 on:
   schedule:
-    # UTC 21:30 = KST 06:30. 생성 완료 즉시 발송(대기 로직 없음) — GitHub Actions
-    # schedule 이벤트 자체가 수십 분~수 시간 지연될 수 있어(workflow_dispatch는
-    # 매번 수 초 내 시작되는 것과 대조적으로 실측됨) 정확한 06:30 실행을 보장하진
-    # 못하지만, 목표 시각에 맞춰 대기하던 이전 설계보다 더 빨리 전달된다.
-    - cron: "30 21 * * *"
+    # UTC 21:40 = KST 06:40. 생성 완료 즉시 발송(대기 로직 없음)
+    - cron: "40 21 * * *"
   workflow_dispatch:
 
 permissions:
