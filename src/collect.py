@@ -9,6 +9,7 @@ import email.utils
 import json
 import logging
 import re
+import threading
 import urllib.parse
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -17,6 +18,9 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 log = logging.getLogger(__name__)
+
+# trafilatura(lxml C 바인딩) 멀티스레드 동시 메모리 해제 충돌(SIGABRT) 방지용 락
+_trafilatura_lock = threading.Lock()
 
 KST = timezone(timedelta(hours=9))
 RSS_BASE = "https://news.google.com/rss/search"
@@ -96,9 +100,11 @@ def _fetch_page_info(url: str) -> tuple[datetime | None, str | None]:
     try:
         import trafilatura
 
-        full_text = trafilatura.extract(
-            html, url=url, include_comments=False, include_tables=False, favor_precision=True
-        )
+        # C-extension(lxml)의 멀티스레드 메모리 해제 충돌 방지를 위해 락 사용
+        with _trafilatura_lock:
+            full_text = trafilatura.extract(
+                html, url=url, include_comments=False, include_tables=False, favor_precision=True
+            )
     except Exception as e:
         log.debug("본문 추출 실패 (%s): %s", url, e)
 
@@ -259,23 +265,22 @@ def resolve_links(articles: list[dict], max_workers: int = 12) -> None:
     def _resolve(article: dict) -> None:
         url = article["link"]
         if "news.google.com" in url:
-            # 1차 시도: googlenewsdecoder (버전별 status/success 키 모두 호환)
-            if gnewsdecoder is not None:
+            # 1차 시도: C 라이브러리(selectolax) 충돌 없는 순수 Python 자체 내장 디코더 우선 사용
+            try:
+                standalone_url = _decode_google_news_standalone(url)
+                if standalone_url:
+                    article["link"] = standalone_url
+            except Exception as e:
+                log.debug("자체 내장 디코더 복원 실패 (%s): %s", article["title"][:30], e)
+
+            # 2차 시도: 외부 라이브러리 googlenewsdecoder 시도
+            if "news.google.com" in article["link"] and gnewsdecoder is not None:
                 try:
                     result = gnewsdecoder(url, interval=0)
                     if (result.get("success") or result.get("status")) and result.get("decoded_url"):
                         article["link"] = result["decoded_url"]
                 except Exception as e:
                     log.debug("googlenewsdecoder 복원 실패 (%s): %s", article["title"][:30], e)
-
-            # 2차 시도: 외부 라이브러리 실패 시 자체 내장 디코더로 복원
-            if "news.google.com" in article["link"]:
-                try:
-                    standalone_url = _decode_google_news_standalone(url)
-                    if standalone_url:
-                        article["link"] = standalone_url
-                except Exception as e:
-                    log.debug("자체 내장 디코더 복원 실패 (%s): %s", article["title"][:30], e)
 
             # 3차 시도: HTTP 리다이렉트 추적
             if "news.google.com" in article["link"]:
