@@ -2,8 +2,8 @@ name: daily-newsletter
 
 on:
   schedule:
-    # UTC 21:40 = KST 06:40. 생성 완료 즉시 발송(대기 로직 없음)
-    - cron: "40 21 * * *"
+    # UTC 21:50 = KST 06:50. 생성 완료 즉시 발송(대기 로직 없음)
+    - cron: "50 21 * * *"
   workflow_dispatch:
 
 permissions:
