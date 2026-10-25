@@ -239,7 +239,7 @@ GitHub Actions (cron 06:50 KST 1회)
 | RSS `pubDate` 누락/부정확 | 발행일 확인 불가 기사는 수집 단계에서 엄격 배제. `pubDate`가 부정확한 경우는 §3.6 신선도 이중 검증으로 보완 |
 | **URL에 발행일이 없는 언론사(네이버 등)** | 이전 버전은 URL 임베디드 날짜에만 의존해 이 경우 신선도 재검증이 무력화됐음 → 원문 페이지 메타태그 기반 실제 발행 시각(`page_published`)을 최우선 신호로 추가해 해결 |
 | **본문 전체 수집에 따른 비용 증가** | 2단계(Gemini)·3단계(Claude) 모두 본문 발췌를 사용하면서 Claude 입력 토큰이 크게 증가한 사례 실측(후보 133건, `CONTENT_EXCERPT_CHARS`=1200자 기준 입력 ~13만 토큰, 실행당 ~$0.3). `CONTENT_EXCERPT_CHARS`를 500자로 낮춰 비용을 예산 범위로 재조정 — 늘릴수록 판단 품질↑·비용↑ 트레이드오프이므로 필요 시 재조정 |
-| **sonnet-5 thinking 기본 활성화** | thinking을 명시적으로 끄지 않으면 구조화 출력(JSON) 생성 전에 `max_tokens`를 소진해 빈 응답(StopIteration)으로 실패한 사례 있음 → `classify.py`에서 `thinking: {"type": "disabled"}` 명시로 해결 |
+| **sonnet-5 / 최신 Claude 모델 thinking 정책 변경 대응** | sonnet-5 계열은 thinking이 기본 활성화라 비활성화하지 않으면 `max_tokens`를 소진해 빈 응답(StopIteration)으로 실패할 수 있음. 최신 모델(sonnet-5-5 등)에서는 `thinking: {"type": "disabled"}` 대신 `thinking: {"type": "between_tools"}`를 요구(400 Bad Request)하므로, `classify.py`에서 `between_tools` → `disabled` → 파라미터 제외 순으로 유연한 순차 폴백 구조를 적용해 버전 간 호환성 확보 |
 | **Gemini 무료 할당량 0 문제** | 일부 Google Cloud 프로젝트/계정에서 새 프로젝트로 키를 재발급해도 `quota_limit_value: 0`이 지속되는 사례 확인(결제 계정 연결·1시간 경과 후에도 미해결, 최종적으로 키를 재발급하자 해소) → 코드는 이 경우도 그레이스풀 스킵으로 처리하므로 나머지 파이프라인엔 영향 없음. 해결은 SETUP.md 참조 |
 | **Gemini 모델 버전 노후화(404)** | 신규 발급 키/프로젝트에서는 구버전 모델이 "no longer available to new users"로 404를 반환하는 사례 확인(`gemini-2.5-flash` → `gemini-3.5-flash`로 대응) → `gemini_model` config 값을 계정에서 실제 사용 가능한 모델로 주기적으로 갱신 필요, 확인 안 되면 이 역시 그레이스풀 스킵 |
 | Notion 데이터베이스 title 속성명 상이 | 사용자마다 "이름"/"Name" 등으로 다를 수 있어, 매 실행 시 DB 스키마를 조회해 title 타입 속성을 동적으로 탐지 |

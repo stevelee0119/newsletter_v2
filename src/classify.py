@@ -105,19 +105,43 @@ def classify(candidates: list[dict], config: dict) -> tuple[dict[str, list[dict]
         limits=json.dumps(limits, ensure_ascii=False),
     )
 
-    response = client.messages.create(
-        model=config.get("model", "claude-haiku-4-5"),
-        max_tokens=8000,
-        thinking={"type": "disabled"},
-        system=system,
-        output_config={"format": {"type": "json_schema", "schema": _schema()}},
-        messages=[
+    # API 호출 공통 파라미터 구성
+    call_kwargs = {
+        "model": config.get("model", "claude-haiku-4-5"),
+        "max_tokens": 8000,
+        "system": system,
+        "output_config": {"format": {"type": "json_schema", "schema": _schema()}},
+        "messages": [
             {
                 "role": "user",
                 "content": "기사 목록:\n" + json.dumps(articles_payload, ensure_ascii=False),
             }
         ],
-    )
+    }
+
+    # 최신 Claude 모델(claude-sonnet-5-5 등)은 사고 비활성화 시 {"type": "between_tools"}를 요구함
+    # 모델 버전 간 호환성을 보장하기 위해 between_tools -> disabled -> 생략 순서로 폴백 처리
+    try:
+        response = client.messages.create(
+            **call_kwargs,
+            thinking={"type": "between_tools"},
+        )
+    except anthropic.BadRequestError as e:
+        if "thinking" in str(e):
+            log.warning("thinking={'type': 'between_tools'} 호출 실패, {'type': 'disabled'}로 재시도: %s", e)
+            try:
+                response = client.messages.create(
+                    **call_kwargs,
+                    thinking={"type": "disabled"},
+                )
+            except anthropic.BadRequestError as e2:
+                if "thinking" in str(e2):
+                    log.warning("thinking={'type': 'disabled'} 호출 실패, thinking 파라미터 제외 후 재시도: %s", e2)
+                    response = client.messages.create(**call_kwargs)
+                else:
+                    raise
+        else:
+            raise
 
     if response.stop_reason == "refusal":
         raise RuntimeError("분류 요청이 거부되었습니다 (stop_reason=refusal)")
