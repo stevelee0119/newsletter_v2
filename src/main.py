@@ -54,13 +54,17 @@ def _link_url(now: datetime) -> str:
     return "https://github.com"
 
 
-def generate() -> bool:
-    """뉴스레터 생성. 이미 당일분이 있으면 False(스킵)."""
+def generate(force: bool = False) -> bool:
+    """뉴스레터 생성. 이미 당일분이 있고 force=False이면 스킵."""
     now = datetime.now(KST)
     archive = _archive_path(now)
-    if archive.exists():
-        log.info("당일 뉴스레터가 이미 존재합니다 (%s) — 생성 스킵", archive.name)
+    # 환경변수 FORCE_GENERATE=true이거나 매개변수 force=True이면 강제 재생성 허용
+    is_forced = force or os.environ.get("FORCE_GENERATE", "").lower() in ("1", "true", "yes")
+    if archive.exists() and not is_forced:
+        log.info("당일 뉴스레터가 이미 존재합니다 (%s) — 생성 스킵 (강제 생성은 FORCE_GENERATE=true 또는 --force)", archive.name)
         return False
+    if archive.exists() and is_forced:
+        log.info("당일 뉴스레터가 이미 존재하지만 강제 옵션으로 재생성합니다 (%s)", archive.name)
 
     config = _load_config()
 
@@ -121,12 +125,13 @@ def send() -> None:
 
 def main() -> None:
     cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
+    force = "--force" in sys.argv
     if cmd == "generate":
-        generate()
+        generate(force=force)
     elif cmd == "send":
         send()
     elif cmd == "run":
-        if generate():
+        if generate(force=force):
             send()
     else:
         print(f"unknown command: {cmd}", file=sys.stderr)
